@@ -1,0 +1,11 @@
+/target/
+/dist/
+/node_modules/
+/src-tauri/gen/
+/.vite/
+/.tauri/
+/.DS_Store
+*.log
+*.tmp
+*.bak
+Thumbs.db
