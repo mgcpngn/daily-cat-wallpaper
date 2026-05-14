@@ -145,6 +145,14 @@ struct FeedbackStore {
     records: HashMap<String, FeedbackRecord>,
 }
 
+const QWEN_IMAGE_ENDPOINT: &str =
+    "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+const QWEN_VALIDATION_ENDPOINT: &str =
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
+const OPENAI_DEFAULT_IMAGE_MODEL: &str = "gpt-image-1.5";
+const QWEN_DEFAULT_IMAGE_MODEL: &str = "qwen-image-2.0-pro";
+const QWEN_MAX_IMAGES_PER_REQUEST: usize = 6;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct FeedbackRecord {
     liked: u32,
@@ -459,6 +467,34 @@ impl AppState {
                     message: "Gemini API key and image model are reachable".to_string(),
                 })
             }
+            AiImageProvider::QwenImage => {
+                let api_key = config
+                    .ai_generation
+                    .qwen_api_key
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|key| !key.is_empty())
+                    .ok_or(AppStateError::MissingAiApiKey)?;
+                let model = qwen_model_name(config);
+                let response = self
+                    .client
+                    .post(QWEN_VALIDATION_ENDPOINT)
+                    .bearer_auth(api_key)
+                    .json(&serde_json::json!({
+                        "model": "qwen-plus",
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "max_tokens": 1
+                    }))
+                    .send()
+                    .await?;
+                provider_response_or_error(response).await?;
+                Ok(ApiKeyValidation {
+                    provider: AiImageProvider::QwenImage,
+                    model,
+                    valid: true,
+                    message: "DashScope API key is reachable for Qwen image generation".to_string(),
+                })
+            }
         }
     }
 
@@ -474,6 +510,7 @@ impl AppState {
             AiImageProvider::GoogleNanoBananaPro => {
                 self.generate_google_images(config, &prompt, count).await?
             }
+            AiImageProvider::QwenImage => self.generate_qwen_images(config, &prompt, count).await?,
         };
 
         let output_dir = self.gallery_generated_dir();
@@ -638,6 +675,96 @@ impl AppState {
             .take(count)
             .collect();
         decode_image_payloads(payloads)
+    }
+
+    async fn generate_qwen_images(
+        &self,
+        config: &AppConfig,
+        prompt: &str,
+        count: usize,
+    ) -> Result<Vec<Vec<u8>>, AppStateError> {
+        let api_key = config
+            .ai_generation
+            .qwen_api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .ok_or(AppStateError::MissingAiApiKey)?;
+        let model = qwen_model_name(config);
+
+        #[derive(Debug, Deserialize)]
+        struct QwenResponse {
+            output: Option<QwenOutput>,
+            code: Option<String>,
+            message: Option<String>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct QwenOutput {
+            choices: Vec<QwenChoice>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct QwenChoice {
+            message: QwenMessage,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct QwenMessage {
+            content: Vec<QwenContent>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct QwenContent {
+            image: Option<String>,
+        }
+
+        let mut images = Vec::new();
+        let mut remaining = count.max(1);
+        while remaining > 0 {
+            let batch = remaining.min(QWEN_MAX_IMAGES_PER_REQUEST);
+            let response = self
+                .client
+                .post(QWEN_IMAGE_ENDPOINT)
+                .bearer_auth(api_key)
+                .json(&qwen_image_request_with_model(&model, prompt, batch))
+                .send()
+                .await?;
+            let response = provider_response_or_error(response)
+                .await?
+                .json::<QwenResponse>()
+                .await?;
+            if let Some(code) = response.code {
+                return Err(AppStateError::AiProvider(format!(
+                    "{code}: {}",
+                    response.message.unwrap_or_default()
+                )));
+            }
+            let urls = response
+                .output
+                .into_iter()
+                .flat_map(|output| output.choices)
+                .flat_map(|choice| choice.message.content)
+                .filter_map(|content| content.image)
+                .collect::<Vec<_>>();
+            for url in urls {
+                let image = self.client.get(url).send().await?;
+                images.push(
+                    provider_response_or_error(image)
+                        .await?
+                        .bytes()
+                        .await?
+                        .to_vec(),
+                );
+            }
+            remaining -= batch;
+        }
+
+        if images.is_empty() {
+            Err(AppStateError::MissingAiImageData)
+        } else {
+            Ok(images)
+        }
     }
 
     async fn resolve_wallpaper_image_excluding(
@@ -1153,12 +1280,11 @@ async fn provider_response_or_error(
 }
 
 fn openai_image_model(config: &AppConfig) -> &str {
-    if config.ai_generation.transparent_cutout
-        && config.ai_generation.openai_model.trim() == "gpt-image-2"
-    {
-        "gpt-image-1.5"
+    let model = config.ai_generation.openai_model.trim();
+    if model.is_empty() {
+        OPENAI_DEFAULT_IMAGE_MODEL
     } else {
-        config.ai_generation.openai_model.trim()
+        model
     }
 }
 
@@ -1169,6 +1295,15 @@ fn google_model_name(config: &AppConfig) -> String {
         .trim()
         .trim_start_matches("models/")
         .to_string()
+}
+
+fn qwen_model_name(config: &AppConfig) -> String {
+    let model = config.ai_generation.qwen_model.trim();
+    if model.is_empty() {
+        QWEN_DEFAULT_IMAGE_MODEL.to_string()
+    } else {
+        model.to_string()
+    }
 }
 
 fn google_image_request(prompt: &str, count: usize) -> serde_json::Value {
@@ -1185,6 +1320,38 @@ fn google_image_request(prompt: &str, count: usize) -> serde_json::Value {
                 "aspectRatio": "1:1",
                 "imageSize": "2K"
             }
+        }
+    })
+}
+
+#[cfg(test)]
+fn qwen_image_request(prompt: &str, count: usize) -> serde_json::Value {
+    qwen_image_request_with_model(QWEN_DEFAULT_IMAGE_MODEL, prompt, count)
+}
+
+fn qwen_image_request_with_model(model: &str, prompt: &str, count: usize) -> serde_json::Value {
+    let count = count.clamp(1, QWEN_MAX_IMAGES_PER_REQUEST);
+    let prompt = if count <= 1 {
+        prompt.to_string()
+    } else {
+        format!("{prompt} Generate {count} distinct cat cutout variants in this response.")
+    };
+    serde_json::json!({
+        "model": model,
+        "input": {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"text": prompt}]
+                }
+            ]
+        },
+        "parameters": {
+            "size": "2048*2048",
+            "n": count,
+            "watermark": false,
+            "prompt_extend": false,
+            "negative_prompt": "background, room, wall, floor, furniture, props, text, frame, watermark, logo, low resolution, blurry fur, cropped body, missing paws, malformed limbs"
         }
     })
 }
@@ -2069,6 +2236,22 @@ mod tests {
             serde_json::json!("2K")
         );
         assert!(request["contents"][0]["parts"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("transparent cat prompt"));
+    }
+
+    #[test]
+    fn qwen_image_request_asks_for_2k_transparent_cat_cutouts() {
+        let request = qwen_image_request("transparent cat prompt", 3);
+
+        assert_eq!(request["model"], serde_json::json!("qwen-image-2.0-pro"));
+        assert_eq!(
+            request["parameters"]["size"],
+            serde_json::json!("2048*2048")
+        );
+        assert_eq!(request["parameters"]["n"], serde_json::json!(3));
+        assert!(request["input"]["messages"][0]["content"][0]["text"]
             .as_str()
             .unwrap()
             .contains("transparent cat prompt"));

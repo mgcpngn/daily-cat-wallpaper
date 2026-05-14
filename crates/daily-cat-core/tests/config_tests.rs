@@ -3,8 +3,8 @@ use daily_cat_core::sources::{
     SourceError,
 };
 use daily_cat_core::{
-    AppConfig, Canvas, CatCountStrategy, ConfigError, ImageQuality, LanguagePreference,
-    LayoutEngine, SafeArea, SourcePlanner,
+    AiImageProvider, AppConfig, Canvas, CatCountStrategy, ConfigError, ImageQuality,
+    LanguagePreference, LayoutEngine, SafeArea, SourcePlanner,
 };
 
 #[test]
@@ -37,6 +37,22 @@ fn app_config_defaults_to_automatic_language_with_english_fallback() {
 
     assert_eq!(config.language, LanguagePreference::Auto);
     assert_eq!(config.language.fallback_locale(), "en");
+}
+
+#[test]
+fn chinese_locale_ai_defaults_to_qwen_image_2_pro() {
+    let ai = daily_cat_core::config::localized_ai_generation_defaults("zh-Hans");
+
+    assert_eq!(ai.provider, AiImageProvider::QwenImage);
+    assert_eq!(ai.qwen_model, "qwen-image-2.0-pro");
+}
+
+#[test]
+fn english_locale_ai_defaults_to_openai_image_generation() {
+    let ai = daily_cat_core::config::localized_ai_generation_defaults("en-US");
+
+    assert_eq!(ai.provider, AiImageProvider::OpenAi);
+    assert_eq!(ai.openai_model, "gpt-image-1.5");
 }
 
 #[test]

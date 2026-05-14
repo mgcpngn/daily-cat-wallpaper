@@ -128,15 +128,24 @@ pub enum AiImageProvider {
     #[default]
     OpenAi,
     GoogleNanoBananaPro,
+    QwenImage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AiGenerationConfig {
     pub provider: AiImageProvider,
+    #[serde(default)]
     pub openai_api_key: Option<String>,
+    #[serde(default)]
     pub google_api_key: Option<String>,
+    #[serde(default)]
+    pub qwen_api_key: Option<String>,
+    #[serde(default = "default_openai_image_model")]
     pub openai_model: String,
+    #[serde(default = "default_google_image_model")]
     pub google_model: String,
+    #[serde(default = "default_qwen_image_model")]
+    pub qwen_model: String,
     pub scene: String,
     pub count: u8,
     pub transparent_cutout: bool,
@@ -262,14 +271,25 @@ impl Default for AiGenerationConfig {
             provider: AiImageProvider::OpenAi,
             openai_api_key: None,
             google_api_key: None,
-            openai_model: "gpt-image-1.5".to_string(),
-            google_model: "gemini-3-pro-image-preview".to_string(),
+            qwen_api_key: None,
+            openai_model: default_openai_image_model(),
+            google_model: default_google_image_model(),
+            qwen_model: default_qwen_image_model(),
             scene: "sitting naturally on the desktop edge".to_string(),
             count: 4,
             transparent_cutout: true,
             auto_use_generated: true,
         }
     }
+}
+
+pub fn localized_ai_generation_defaults(locale: &str) -> AiGenerationConfig {
+    let mut config = AiGenerationConfig::default();
+    if locale.trim().to_ascii_lowercase().starts_with("zh") {
+        config.provider = AiImageProvider::QwenImage;
+        config.qwen_model = default_qwen_image_model();
+    }
+    config
 }
 
 impl SourceConfig {
@@ -299,4 +319,16 @@ impl SourceConfig {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_openai_image_model() -> String {
+    "gpt-image-1.5".to_string()
+}
+
+fn default_google_image_model() -> String {
+    "gemini-3-pro-image-preview".to_string()
+}
+
+fn default_qwen_image_model() -> String {
+    "qwen-image-2.0-pro".to_string()
 }

@@ -15,7 +15,7 @@ type LanguagePreference =
 type CatCountStrategy = "MatchDisplays" | "Fixed";
 type CatImageType = "Healing" | "Funny" | "Loaf" | "Kitten" | "Sleepy";
 type PlatformMode = "Automatic" | "StaticOnly" | "InteractionBeta";
-type AiImageProvider = "OpenAi" | "GoogleNanoBananaPro";
+type AiImageProvider = "OpenAi" | "GoogleNanoBananaPro" | "QwenImage";
 type ScheduleConfig =
   | "OnLogin"
   | "ManualOnly"
@@ -58,8 +58,10 @@ type AppConfig = {
     provider: AiImageProvider;
     openai_api_key: string | null;
     google_api_key: string | null;
+    qwen_api_key: string | null;
     openai_model: string;
     google_model: string;
+    qwen_model: string;
     scene: string;
     count: number;
     transparent_cutout: boolean;
@@ -187,7 +189,7 @@ const LANGUAGES: Array<{ value: LanguagePreference; labelKey: string }> = [
   { value: "Korean", labelKey: "language.ko" },
 ];
 
-const defaultConfig: AppConfig = {
+const baseDefaultConfig: AppConfig = {
   language: "Auto",
   breeds: ["mixed"],
   cat_count_strategy: "MatchDisplays",
@@ -223,8 +225,10 @@ const defaultConfig: AppConfig = {
     provider: "OpenAi",
     openai_api_key: null,
     google_api_key: null,
+    qwen_api_key: null,
     openai_model: "gpt-image-1.5",
     google_model: "gemini-3-pro-image-preview",
+    qwen_model: "qwen-image-2.0-pro",
     scene: "sitting naturally on the desktop edge",
     count: 4,
     transparent_cutout: true,
@@ -233,6 +237,8 @@ const defaultConfig: AppConfig = {
   platform_mode: "Automatic",
   launch_at_login: true,
 };
+
+const defaultConfig: AppConfig = withLocaleAiDefaults(baseDefaultConfig, detectLocale());
 
 const dictionary: Record<Locale, Record<string, string>> = {
   en: {
@@ -314,8 +320,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.lowResFallback": "Allow low-resolution fallback",
     "hint.lowResFallback": "Hard disabled: images below 2560x1440 are rejected before saving.",
     "field.aiProvider": "AI provider",
+    "field.openaiModel": "OpenAI model",
+    "field.googleModel": "Gemini model",
+    "field.qwenModel": "Qwen model",
     "field.openaiKey": "OpenAI API key",
     "field.googleKey": "Google API key",
+    "field.qwenKey": "DashScope API key",
     "field.aiScene": "Desktop pet scene",
     "field.aiCount": "Images to generate",
     "field.transparentCutout": "Transparent PNG cutout",
@@ -323,6 +333,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.aiProgress": "Generation monitor",
     "hint.transparentCutout": "Creates a no-background cat asset that can be placed on the desktop.",
     "hint.aiKey": "Generation automatically validates the selected provider key before sending the image request.",
+    "hint.aiProviderDefault": "Chinese locales default to Qwen Image 2.0 Pro. English locales default to OpenAI image generation, with Gemini available as an option.",
     "hint.aiScene": "Example: peeking from the taskbar, sitting beside icons, stretching on the desktop edge.",
     "gallery.path": "Fixed gallery: {path}",
     "gallery.empty": "No cat images in the managed gallery yet. Import HD transparent cats or generate AI transparent cats first.",
@@ -471,8 +482,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.lowResFallback": "允许低分辨率兜底",
     "hint.lowResFallback": "已硬性关闭：低于 2560x1440 的图片不会保存。",
     "field.aiProvider": "AI 提供方",
+    "field.openaiModel": "OpenAI 模型",
+    "field.googleModel": "Gemini 模型",
+    "field.qwenModel": "通义万相模型",
     "field.openaiKey": "OpenAI API Key",
     "field.googleKey": "Google API Key",
+    "field.qwenKey": "DashScope API Key",
     "field.aiScene": "桌面宠物场景",
     "field.aiCount": "生成数量",
     "field.transparentCutout": "透明 PNG 抠图",
@@ -480,6 +495,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.aiProgress": "生成过程监控",
     "hint.transparentCutout": "生成没有背景的猫咪素材，再放到桌面上。",
     "hint.aiKey": "生成前会自动校验当前选择的提供方 API Key，然后再发送图片生成请求。",
+    "hint.aiProviderDefault": "中文环境默认使用通义万相 Qwen Image 2.0 Pro；英文环境默认使用 OpenAI 图片模型，Gemini 可手动选择。",
     "hint.aiScene": "例如：从任务栏探头、坐在图标旁、趴在桌面边缘。",
     "gallery.path": "固定图库：{path}",
     "gallery.empty": "托管图库里还没有猫图。请先导入高清透明猫图，或生成 AI 透明猫。",
@@ -628,8 +644,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.lowResFallback": "允許低解析度備援",
     "hint.lowResFallback": "已硬性關閉：低於 2560x1440 的圖片不會儲存。",
     "field.aiProvider": "AI 提供方",
+    "field.openaiModel": "OpenAI 模型",
+    "field.googleModel": "Gemini 模型",
+    "field.qwenModel": "通義萬相模型",
     "field.openaiKey": "OpenAI API Key",
     "field.googleKey": "Google API Key",
+    "field.qwenKey": "DashScope API Key",
     "field.aiScene": "桌面寵物場景",
     "field.aiCount": "生成數量",
     "field.transparentCutout": "透明 PNG 去背",
@@ -637,6 +657,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.aiProgress": "生成過程監控",
     "hint.transparentCutout": "生成無背景貓咪素材，再放到桌面上。",
     "hint.aiKey": "生成前會自動校驗目前選擇的提供方 API Key，然後再送出圖片生成請求。",
+    "hint.aiProviderDefault": "中文環境預設使用通義萬相 Qwen Image 2.0 Pro；英文環境預設使用 OpenAI 圖片模型，Gemini 可手動選擇。",
     "hint.aiScene": "例如：從工作列探頭、坐在圖示旁、趴在桌面邊緣。",
     "gallery.path": "固定圖庫：{path}",
     "gallery.empty": "受管理圖庫裡還沒有貓圖。請先匯入高清透明貓圖，或生成 AI 透明貓。",
@@ -785,8 +806,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.lowResFallback": "低解像度フォールバックを許可",
     "hint.lowResFallback": "固定で無効: 2560x1440 未満の画像は保存しません。",
     "field.aiProvider": "AI プロバイダー",
+    "field.openaiModel": "OpenAI モデル",
+    "field.googleModel": "Gemini モデル",
+    "field.qwenModel": "Qwen モデル",
     "field.openaiKey": "OpenAI API キー",
     "field.googleKey": "Google API キー",
+    "field.qwenKey": "DashScope API キー",
     "field.aiScene": "デスクトップペット場面",
     "field.aiCount": "生成枚数",
     "field.transparentCutout": "透明 PNG カットアウト",
@@ -794,6 +819,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.aiProgress": "生成モニター",
     "hint.transparentCutout": "背景なしの猫素材を作り、デスクトップに配置します。",
     "hint.aiKey": "生成前に選択したプロバイダーの API キーを自動検証し、その後に画像生成リクエストを送ります。",
+    "hint.aiProviderDefault": "中国語環境では Qwen Image 2.0 Pro、英語環境では OpenAI 画像モデルを既定にし、Gemini も選択できます。",
     "hint.aiScene": "例: タスクバーから覗く、アイコン横に座る、デスクトップ端で伸びる。",
     "gallery.path": "固定ギャラリー: {path}",
     "gallery.empty": "管理ギャラリーに猫画像はまだありません。HD の透明猫画像を読み込むか、AI 透明猫を生成してください。",
@@ -942,8 +968,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.lowResFallback": "저해상도 대체 허용",
     "hint.lowResFallback": "항상 비활성: 2560x1440 미만 이미지는 저장하지 않습니다.",
     "field.aiProvider": "AI 제공자",
+    "field.openaiModel": "OpenAI 모델",
+    "field.googleModel": "Gemini 모델",
+    "field.qwenModel": "Qwen 모델",
     "field.openaiKey": "OpenAI API 키",
     "field.googleKey": "Google API 키",
+    "field.qwenKey": "DashScope API 키",
     "field.aiScene": "데스크톱 펫 장면",
     "field.aiCount": "생성 수",
     "field.transparentCutout": "투명 PNG 컷아웃",
@@ -951,6 +981,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.aiProgress": "생성 진행 모니터",
     "hint.transparentCutout": "배경 없는 고양이 소재를 만들어 데스크톱에 배치합니다.",
     "hint.aiKey": "생성 전 선택한 제공자의 API 키를 자동 검증한 뒤 이미지 생성 요청을 보냅니다.",
+    "hint.aiProviderDefault": "중국어 환경은 Qwen Image 2.0 Pro를 기본값으로, 영어 환경은 OpenAI 이미지 모델을 기본값으로 사용하며 Gemini도 선택할 수 있습니다.",
     "hint.aiScene": "예: 작업 표시줄에서 고개 내밀기, 아이콘 옆에 앉기, 화면 가장자리에서 스트레칭.",
     "gallery.path": "고정 갤러리: {path}",
     "gallery.empty": "관리 갤러리에 아직 고양이 이미지가 없습니다. HD 투명 고양이 이미지를 가져오거나 AI 투명 고양이를 먼저 생성하세요.",
@@ -1441,10 +1472,12 @@ function App() {
               <select
                 value={config.language}
                 onChange={(event) =>
-                  setConfig({
-                    ...config,
-                    language: event.currentTarget.value as LanguagePreference,
-                  })
+                  setConfig(
+                    mergeConfig({
+                      ...config,
+                      language: event.currentTarget.value as LanguagePreference,
+                    }),
+                  )
                 }
               >
                 {LANGUAGES.map((language) => (
@@ -1856,7 +1889,54 @@ function App() {
               >
                 <option value="OpenAi">OpenAI GPT Image 1.5</option>
                 <option value="GoogleNanoBananaPro">Google Nano Banana Pro</option>
+                <option value="QwenImage">Qwen Image 2.0 Pro (China)</option>
               </select>
+              <small>{t("hint.aiProviderDefault")}</small>
+            </label>
+            <label className="field">
+              {t("field.openaiModel")}
+              <input
+                value={config.ai_generation.openai_model}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    ai_generation: {
+                      ...config.ai_generation,
+                      openai_model: event.currentTarget.value,
+                    },
+                  })
+                }
+              />
+            </label>
+            <label className="field">
+              {t("field.googleModel")}
+              <input
+                value={config.ai_generation.google_model}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    ai_generation: {
+                      ...config.ai_generation,
+                      google_model: event.currentTarget.value,
+                    },
+                  })
+                }
+              />
+            </label>
+            <label className="field">
+              {t("field.qwenModel")}
+              <input
+                value={config.ai_generation.qwen_model}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    ai_generation: {
+                      ...config.ai_generation,
+                      qwen_model: event.currentTarget.value,
+                    },
+                  })
+                }
+              />
             </label>
             <label className="field">
               {t("field.openaiKey")}
@@ -1887,6 +1967,23 @@ function App() {
                     ai_generation: {
                       ...config.ai_generation,
                       google_api_key: event.currentTarget.value || null,
+                    },
+                  })
+                }
+              />
+            </label>
+            <label className="field">
+              {t("field.qwenKey")}
+              <input
+                placeholder="sk-..."
+                type="password"
+                value={config.ai_generation.qwen_api_key ?? ""}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    ai_generation: {
+                      ...config.ai_generation,
+                      qwen_api_key: event.currentTarget.value || null,
                     },
                   })
                 }
@@ -2247,6 +2344,7 @@ function resolveLocale(language: LanguagePreference): Locale {
 }
 
 function detectLocale(): Locale {
+  if (typeof navigator === "undefined") return "en";
   const languages = navigator.languages?.length ? navigator.languages : [navigator.language];
   for (const language of languages) {
     const normalized = language.toLowerCase();
@@ -2325,31 +2423,79 @@ function clientSlots(catCount: number): Rect[] {
 }
 
 function mergeConfig(config: AppConfig): AppConfig {
-  return {
-    ...defaultConfig,
+  const merged = {
+    ...baseDefaultConfig,
     ...config,
     image_quality: {
-      ...defaultConfig.image_quality,
+      ...baseDefaultConfig.image_quality,
       ...(config.image_quality ?? {}),
     },
     interactions: {
-      ...defaultConfig.interactions,
+      ...baseDefaultConfig.interactions,
       ...(config.interactions ?? {}),
     },
     sources: {
-      ...defaultConfig.sources,
+      ...baseDefaultConfig.sources,
       ...(config.sources ?? {}),
     },
     ai_generation: {
-      ...defaultConfig.ai_generation,
+      ...baseDefaultConfig.ai_generation,
       ...(config.ai_generation ?? {}),
+      transparent_cutout: true,
+    },
+  };
+  return withLocaleAiDefaults(
+    merged,
+    resolveLocale(merged.language),
+    !hasAnyAiProviderKey(config.ai_generation),
+  );
+}
+
+function imageSrc(_path: string): string {
+  return "";
+}
+
+function withLocaleAiDefaults(
+  config: AppConfig,
+  locale: Locale,
+  applyProvider = true,
+): AppConfig {
+  const aiDefaults = localizedAiGenerationDefaults(locale);
+  return {
+    ...config,
+    ai_generation: {
+      ...aiDefaults,
+      ...config.ai_generation,
+      provider: applyProvider ? aiDefaults.provider : config.ai_generation.provider,
+      openai_model: config.ai_generation.openai_model || aiDefaults.openai_model,
+      google_model: config.ai_generation.google_model || aiDefaults.google_model,
+      qwen_model: config.ai_generation.qwen_model || aiDefaults.qwen_model,
       transparent_cutout: true,
     },
   };
 }
 
-function imageSrc(_path: string): string {
-  return "";
+function localizedAiGenerationDefaults(locale: Locale): AppConfig["ai_generation"] {
+  const englishDefaults = {
+    ...baseDefaultConfig.ai_generation,
+    provider: "OpenAi" as AiImageProvider,
+    openai_model: "gpt-image-1.5",
+    google_model: "gemini-3-pro-image-preview",
+    qwen_model: "qwen-image-2.0-pro",
+  };
+  if (locale === "zh-Hans" || locale === "zh-Hant") {
+    return {
+      ...englishDefaults,
+      provider: "QwenImage",
+    };
+  }
+  return englishDefaults;
+}
+
+function hasAnyAiProviderKey(ai?: AppConfig["ai_generation"]): boolean {
+  return Boolean(
+    ai?.openai_api_key?.trim() || ai?.google_api_key?.trim() || ai?.qwen_api_key?.trim(),
+  );
 }
 
 function aiProgressMessage(
