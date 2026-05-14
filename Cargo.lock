@@ -479,7 +479,7 @@ checksum = "52560adf09603e58c9a7ee1fe1dcb95a16927b17c127f0ac02d6e768a0e25bc1"
 
 [[package]]
 name = "daily-cat-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "directories",
@@ -494,17 +494,19 @@ dependencies = [
 
 [[package]]
 name = "daily-cat-wallpaper"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
  "daily-cat-core",
  "directories",
+ "image",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "url",

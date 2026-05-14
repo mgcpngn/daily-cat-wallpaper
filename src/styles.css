@@ -224,6 +224,32 @@ input[type="number"],
   color: #332822;
 }
 
+.quality-grid,
+.resolution-inputs {
+  display: grid;
+  gap: 10px;
+}
+
+.quality-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.resolution-inputs {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.resolution-inputs span {
+  color: #8b4d38;
+  font-weight: 900;
+}
+
+.field small {
+  color: #77665c;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 select[multiple] {
   min-height: 128px;
 }

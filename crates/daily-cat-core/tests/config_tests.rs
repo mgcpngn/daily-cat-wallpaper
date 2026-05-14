@@ -1,5 +1,6 @@
 use daily_cat_core::{
-    AppConfig, Canvas, ConfigError, LayoutEngine, SafeArea, SourceError, SourcePlanner,
+    AppConfig, Canvas, CatCountStrategy, ConfigError, ImageQuality, LanguagePreference,
+    LayoutEngine, SafeArea, SourceError, SourcePlanner,
 };
 
 #[test]
@@ -24,6 +25,51 @@ fn app_config_rejects_zero_or_more_than_five_cats() {
 
         assert_eq!(config.validate(), Err(ConfigError::InvalidCatCount));
     }
+}
+
+#[test]
+fn app_config_defaults_to_automatic_language_with_english_fallback() {
+    let config = AppConfig::default();
+
+    assert_eq!(config.language, LanguagePreference::Auto);
+    assert_eq!(config.language.fallback_locale(), "en");
+}
+
+#[test]
+fn app_config_defaults_to_display_matched_cat_count() {
+    let config = AppConfig::default();
+    let engine = LayoutEngine;
+
+    assert_eq!(config.cat_count_strategy, CatCountStrategy::MatchDisplays);
+    assert_eq!(engine.cat_assignments(2, &config), vec![0, 1]);
+}
+
+#[test]
+fn fixed_single_cat_count_reuses_the_same_cat_on_each_display() {
+    let config = AppConfig {
+        cat_count_strategy: CatCountStrategy::Fixed,
+        cat_count: 1,
+        ..AppConfig::default()
+    };
+    let engine = LayoutEngine;
+
+    assert_eq!(engine.cat_assignments(2, &config), vec![0, 0]);
+}
+
+#[test]
+fn image_quality_rejects_sub_hd_thresholds() {
+    let config = AppConfig {
+        image_quality: ImageQuality {
+            min_width: 1280,
+            min_height: 720,
+            preferred_width: 1920,
+            preferred_height: 1080,
+            allow_low_resolution_fallback: false,
+        },
+        ..AppConfig::default()
+    };
+
+    assert_eq!(config.validate(), Err(ConfigError::InvalidImageQuality));
 }
 
 #[test]

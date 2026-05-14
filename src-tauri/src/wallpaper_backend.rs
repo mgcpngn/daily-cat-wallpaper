@@ -108,6 +108,8 @@ fn set_wallpaper_platform(image_path: &Path) -> Result<(), WallpaperError> {
         SystemParametersInfoW, SPIF_SENDWININICHANGE, SPIF_UPDATEINIFILE, SPI_SETDESKWALLPAPER,
     };
 
+    let _ = set_windows_wallpaper_style_span();
+
     let mut encoded: Vec<u16> = image_path.as_os_str().encode_wide().collect();
     encoded.push(0);
 
@@ -127,6 +129,77 @@ fn set_wallpaper_platform(image_path: &Path) -> Result<(), WallpaperError> {
     } else {
         Ok(())
     }
+}
+
+#[cfg(target_os = "windows")]
+fn set_windows_wallpaper_style_span() -> Result<(), WallpaperError> {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, HKEY_CURRENT_USER, KEY_SET_VALUE,
+    };
+
+    let subkey = wide_null("Control Panel\\Desktop");
+    let mut key = std::ptr::null_mut();
+    let status = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            0,
+            KEY_SET_VALUE,
+            &mut key,
+        )
+    };
+    if status != 0 {
+        return Err(WallpaperError::CommandFailed(format!(
+            "RegOpenKeyExW returned {status}"
+        )));
+    }
+
+    let style_result = set_registry_string(key, "WallpaperStyle", "22")
+        .and_then(|_| set_registry_string(key, "TileWallpaper", "0"));
+    unsafe {
+        RegCloseKey(key);
+    }
+    style_result
+}
+
+#[cfg(target_os = "windows")]
+fn set_registry_string(
+    key: windows_sys::Win32::System::Registry::HKEY,
+    name: &str,
+    value: &str,
+) -> Result<(), WallpaperError> {
+    use windows_sys::Win32::System::Registry::{RegSetValueExW, REG_SZ};
+
+    let name = wide_null(name);
+    let value = wide_null(value);
+    let bytes = unsafe { std::slice::from_raw_parts(value.as_ptr() as *const u8, value.len() * 2) };
+    let status = unsafe {
+        RegSetValueExW(
+            key,
+            name.as_ptr(),
+            0,
+            REG_SZ,
+            bytes.as_ptr(),
+            bytes.len() as u32,
+        )
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(WallpaperError::CommandFailed(format!(
+            "RegSetValueExW returned {status}"
+        )))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn wide_null(value: &str) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+
+    std::ffi::OsStr::new(value)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 #[cfg(target_os = "macos")]

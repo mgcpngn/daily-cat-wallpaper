@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::config::{AppConfig, CatCountStrategy};
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Canvas {
     pub width: u32,
@@ -26,6 +28,25 @@ pub struct Rect {
 pub struct LayoutEngine;
 
 impl LayoutEngine {
+    pub fn cat_assignments(&self, display_count: usize, config: &AppConfig) -> Vec<usize> {
+        let display_count = display_count.max(1);
+        match config.cat_count_strategy {
+            CatCountStrategy::MatchDisplays => (0..display_count).collect(),
+            CatCountStrategy::Fixed => {
+                let unique_count = usize::from(config.cat_count.max(1));
+                (0..display_count)
+                    .map(|display_index| {
+                        if unique_count == 1 {
+                            0
+                        } else {
+                            display_index % unique_count
+                        }
+                    })
+                    .collect()
+            }
+        }
+    }
+
     pub fn slots(&self, canvas: Canvas, safe_area: SafeArea, cat_count: u8) -> Vec<Rect> {
         if cat_count == 0 || cat_count > 5 {
             return Vec::new();
