@@ -347,7 +347,7 @@ impl AppState {
     ) -> Result<InteractionLayerPayload, AppStateError> {
         let path = self.interaction_layer_image_path(config)?;
         Ok(InteractionLayerPayload {
-            image_data_url: image_data_url(&path, 900)?,
+            image_data_url: String::new(),
             image_path: path,
             interactions: config.interactions.clone(),
         })
@@ -591,13 +591,30 @@ impl AppState {
             return Ok(path);
         }
 
-        let mut images = self.list_gallery_images(&config.image_quality)?;
-        images.retain(|image| image.meets_quality && !image.rejected);
-        images
-            .iter()
-            .find(|image| image.transparent)
-            .or_else(|| images.first())
-            .map(|image| image.path.clone())
+        let feedback = self.load_feedback()?;
+        let mut candidates = Vec::new();
+        for child in ["generated", "imports", "downloads"] {
+            let dir = self.gallery_dir().join(child);
+            let Ok(entries) = fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.filter_map(Result::ok) {
+                let path = entry.path();
+                if path.is_file()
+                    && is_supported_image(&path)
+                    && image_meets_quality(&path, &config.image_quality)
+                    && feedback.score_for_path(&path) > -2
+                {
+                    candidates.push(path);
+                }
+            }
+        }
+
+        let fallback = candidates.first().cloned();
+        candidates
+            .into_iter()
+            .find(|path| image_has_transparency(path))
+            .or(fallback)
             .ok_or(AppStateError::NoCandidate)
     }
 
@@ -2295,11 +2312,30 @@ mod tests {
         let payload = state.interaction_layer_payload(&config).unwrap();
 
         assert_eq!(payload.image_path, cat_path);
-        assert!(payload.image_data_url.starts_with("data:image/png;base64,"));
+        assert!(payload.image_data_url.is_empty());
         assert!(payload.interactions.breathing);
         assert!(payload.interactions.mouse_proximity);
         assert!(payload.interactions.click_paw);
         assert!(payload.interactions.keyboard_bongo);
+    }
+
+    #[test]
+    fn interaction_layer_payload_uses_gallery_image_without_embedded_image_bytes() {
+        let dir = tempdir().unwrap();
+        let state = test_state(dir.path());
+        let generated = state.gallery_generated_dir();
+        fs::create_dir_all(&generated).unwrap();
+        let cat_path = generated.join("generated-overlay-cat.png");
+        transparent_test_cat(2560, 1440, 280, 150)
+            .save(&cat_path)
+            .unwrap();
+
+        let payload = state
+            .interaction_layer_payload(&AppConfig::default())
+            .unwrap();
+
+        assert_eq!(payload.image_path, cat_path);
+        assert!(payload.image_data_url.is_empty());
     }
 
     #[test]

@@ -246,7 +246,7 @@ impl Default for InteractionConfig {
         Self {
             breathing: true,
             mouse_proximity: true,
-            click_paw: false,
+            click_paw: true,
             keyboard_bongo: false,
             sound: false,
         }

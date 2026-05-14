@@ -66,6 +66,15 @@ fn ai_generation_defaults_to_desktop_layer_prompt_template() {
 }
 
 #[test]
+fn app_config_enables_visible_click_feedback_by_default() {
+    let config = AppConfig::default();
+
+    assert!(config.interactions.breathing);
+    assert!(config.interactions.mouse_proximity);
+    assert!(config.interactions.click_paw);
+}
+
+#[test]
 fn app_config_defaults_to_display_matched_cat_count() {
     let config = AppConfig::default();
     let engine = LayoutEngine;

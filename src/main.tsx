@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./styles.css";
 
@@ -226,7 +226,7 @@ const baseDefaultConfig: AppConfig = {
   interactions: {
     breathing: true,
     mouse_proximity: true,
-    click_paw: false,
+    click_paw: true,
     keyboard_bongo: false,
     sound: false,
   },
@@ -409,12 +409,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.launch": "Refresh cats when the desktop starts",
     "interaction.breathing": "Breathing",
     "interaction.mouse_proximity": "Mouse proximity",
-    "interaction.click_paw": "Click paw",
+    "interaction.click_paw": "Click cat",
     "interaction.keyboard_bongo": "Keyboard Bongo",
     "interaction.sound": "Sound",
     "hint.breathing": "Subtle motion on generated cat layers",
     "hint.mouse_proximity": "Cats react when the pointer gets close",
-    "hint.click_paw": "Click feedback for cat paws",
+    "hint.click_paw": "Whole-cat click feedback; paw hotspots need per-image calibration",
     "hint.keyboard_bongo": "Keyboard rhythm reaction",
     "hint.sound": "Optional short sound effects",
     "hint.optional": "Optional behavior",
@@ -582,12 +582,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.launch": "桌面启动时自动刷新猫图",
     "interaction.breathing": "呼吸动效",
     "interaction.mouse_proximity": "鼠标靠近",
-    "interaction.click_paw": "点击猫爪",
+    "interaction.click_paw": "点击猫咪",
     "interaction.keyboard_bongo": "键盘 Bongo",
     "interaction.sound": "声音",
     "hint.breathing": "生成猫图层的轻微动效",
     "hint.mouse_proximity": "指针靠近时猫咪响应",
-    "hint.click_paw": "点击猫爪反馈",
+    "hint.click_paw": "整只猫点击反馈；猫爪热点需要逐图校准",
     "hint.keyboard_bongo": "跟随键盘节奏反应",
     "hint.sound": "可选短音效",
     "hint.optional": "可选行为",
@@ -755,12 +755,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.launch": "桌面啟動時自動刷新貓圖",
     "interaction.breathing": "呼吸動效",
     "interaction.mouse_proximity": "滑鼠靠近",
-    "interaction.click_paw": "點擊貓掌",
+    "interaction.click_paw": "點擊貓咪",
     "interaction.keyboard_bongo": "鍵盤 Bongo",
     "interaction.sound": "聲音",
     "hint.breathing": "生成貓圖層的輕微動效",
     "hint.mouse_proximity": "游標靠近時貓咪回應",
-    "hint.click_paw": "點擊貓掌回饋",
+    "hint.click_paw": "整隻貓點擊回饋；貓掌熱點需要逐圖校準",
     "hint.keyboard_bongo": "跟隨鍵盤節奏反應",
     "hint.sound": "可選短音效",
     "hint.optional": "可選行為",
@@ -928,12 +928,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.launch": "デスクトップ起動時に猫画像を更新",
     "interaction.breathing": "呼吸",
     "interaction.mouse_proximity": "マウス接近",
-    "interaction.click_paw": "肉球クリック",
+    "interaction.click_paw": "猫をクリック",
     "interaction.keyboard_bongo": "キーボード Bongo",
     "interaction.sound": "音",
     "hint.breathing": "生成された猫レイヤーの微細な動き",
     "hint.mouse_proximity": "ポインター接近時に猫が反応",
-    "hint.click_paw": "肉球クリックの反応",
+    "hint.click_paw": "猫全体のクリック反応。肉球ホットスポットは画像ごとの調整が必要",
     "hint.keyboard_bongo": "キー入力リズムへの反応",
     "hint.sound": "任意の短い効果音",
     "hint.optional": "任意の動作",
@@ -1101,12 +1101,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.launch": "데스크톱 시작 시 고양이 이미지 새로고침",
     "interaction.breathing": "숨쉬기",
     "interaction.mouse_proximity": "마우스 접근",
-    "interaction.click_paw": "발바닥 클릭",
+    "interaction.click_paw": "고양이 클릭",
     "interaction.keyboard_bongo": "키보드 Bongo",
     "interaction.sound": "소리",
     "hint.breathing": "생성된 고양이 레이어의 은은한 움직임",
     "hint.mouse_proximity": "포인터가 가까워지면 고양이가 반응",
-    "hint.click_paw": "발바닥 클릭 피드백",
+    "hint.click_paw": "고양이 전체 클릭 피드백. 발바닥 핫스팟은 이미지별 보정이 필요",
     "hint.keyboard_bongo": "키보드 리듬 반응",
     "hint.sound": "선택적 짧은 효과음",
     "hint.optional": "선택 동작",
@@ -2424,6 +2424,7 @@ function CatOverlay() {
   if (!payload) {
     return <main className="cat-overlay-stage" />;
   }
+  const imageSrc = overlayImageSrc(payload);
 
   return (
     <main
@@ -2462,10 +2463,17 @@ function CatOverlay() {
           playSoftClick();
         }}
       >
-        <img alt="" src={payload.image_data_url} />
+        <img alt="" src={imageSrc} />
       </button>
     </main>
   );
+}
+
+function overlayImageSrc(payload: InteractionLayerPayload) {
+  if (hasTauriRuntime() && payload.image_path) {
+    return convertFileSrc(payload.image_path);
+  }
+  return payload.image_data_url;
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {

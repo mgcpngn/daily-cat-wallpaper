@@ -346,20 +346,24 @@ fn ensure_interaction_window(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let window = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         INTERACTION_WINDOW_LABEL,
         WebviewUrl::App("index.html?overlay=1".into()),
     )
     .title("Daily Cat Overlay")
-    .decorations(false)
-    .transparent(true)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .resizable(false)
-    .inner_size(420.0, 420.0)
-    .build()
-    .map_err(|error| error.to_string())?;
+    .decorations(false);
+
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+
+    let window = builder
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .inner_size(420.0, 420.0)
+        .build()
+        .map_err(|error| error.to_string())?;
 
     if let Some(monitor) = app
         .primary_monitor()

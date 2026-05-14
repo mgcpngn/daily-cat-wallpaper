@@ -527,6 +527,7 @@ input[type="range"] {
   border: 0;
   background: transparent;
   box-shadow: none;
+  cursor: pointer;
 }
 
 .cat-overlay-button:hover {
