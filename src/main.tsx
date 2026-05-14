@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import "./styles.css";
@@ -131,6 +131,11 @@ type GalleryImage = {
   rejected: boolean;
 };
 
+type ImportImagePayload = {
+  file_name: string;
+  data_base64: string;
+};
+
 type LearningSummary = {
   liked: number;
   disliked: number;
@@ -225,6 +230,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.save": "Save preferences",
     "action.select": "Use",
     "action.delete": "Delete",
+    "action.import": "Import cat images",
+    "action.openGallery": "Open gallery folder",
+    "action.reloadGallery": "Reload gallery",
     "action.like": "Like",
     "action.dislike": "Dislike",
     "status.label": "Status",
@@ -239,6 +247,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.generatingAi": "Generating transparent cat cutouts",
     "status.generatedAi": "Generated {count} transparent cats",
     "status.galleryLoaded": "Gallery loaded",
+    "status.importing": "Importing selected cat images",
+    "status.imported": "Imported {count} cat images",
+    "status.galleryOpened": "Gallery folder opened",
     "status.deleted": "Deleted image",
     "status.feedback": "Feedback saved, future selection adjusted",
     "status.wallpaperSet": "Wallpaper set: {path}",
@@ -290,10 +301,14 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.transparentCutout": "Creates a no-background cat asset that can be placed on the desktop.",
     "hint.aiScene": "Example: peeking from the taskbar, sitting beside icons, stretching on the desktop edge.",
     "gallery.path": "Fixed gallery: {path}",
-    "gallery.empty": "No cat images in the managed gallery yet.",
+    "gallery.empty": "No cat images in the managed gallery yet. Import HD transparent cats or generate AI transparent cats first.",
     "gallery.quality": "{width}x{height} / {source} / score {score}",
     "gallery.lowQuality": "Below 2K gate",
     "gallery.rejected": "Rejected by feedback",
+    "gallery.transparent": "Transparent",
+    "gallery.photo": "Photo/background",
+    "gallery.selected": "Selected",
+    "gallery.help": "Pick images yourself, then press Use. Low-resolution images are rejected during import.",
     "analysis.score": "Effect score {score}/100",
     "analysis.size": "Final {width}x{height}, desktop {virtualWidth}x{virtualHeight}",
     "analysis.clean": "No measurable issues found.",
@@ -365,6 +380,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.save": "保存配置",
     "action.select": "使用",
     "action.delete": "删除",
+    "action.import": "导入猫图",
+    "action.openGallery": "打开图库目录",
+    "action.reloadGallery": "刷新图库",
     "action.like": "喜欢",
     "action.dislike": "不喜欢",
     "status.label": "状态",
@@ -379,6 +397,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.generatingAi": "正在生成透明猫抠图",
     "status.generatedAi": "已生成 {count} 张透明猫图",
     "status.galleryLoaded": "图库已加载",
+    "status.importing": "正在导入已选择猫图",
+    "status.imported": "已导入 {count} 张猫图",
+    "status.galleryOpened": "图库目录已打开",
     "status.deleted": "图片已删除",
     "status.feedback": "反馈已保存，后续选择已调整",
     "status.wallpaperSet": "壁纸已设置：{path}",
@@ -429,10 +450,14 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.transparentCutout": "生成没有背景的猫咪素材，再放到桌面上。",
     "hint.aiScene": "例如：从任务栏探头、坐在图标旁、趴在桌面边缘。",
     "gallery.path": "固定图库：{path}",
-    "gallery.empty": "托管图库里还没有猫图。",
+    "gallery.empty": "托管图库里还没有猫图。请先导入高清透明猫图，或生成 AI 透明猫。",
     "gallery.quality": "{width}x{height} / {source} / 评分 {score}",
     "gallery.lowQuality": "低于 2K 门槛",
     "gallery.rejected": "已被反馈拒用",
+    "gallery.transparent": "透明图",
+    "gallery.photo": "照片/带背景",
+    "gallery.selected": "已选中",
+    "gallery.help": "用户可以自己选图，导入后点“使用”。低分辨率图片会在导入时直接拒绝。",
     "analysis.score": "效果评分 {score}/100",
     "analysis.size": "成品 {width}x{height}，桌面 {virtualWidth}x{virtualHeight}",
     "analysis.clean": "未发现可量化问题。",
@@ -504,6 +529,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.save": "儲存設定",
     "action.select": "使用",
     "action.delete": "刪除",
+    "action.import": "匯入貓圖",
+    "action.openGallery": "開啟圖庫目錄",
+    "action.reloadGallery": "重新載入圖庫",
     "action.like": "喜歡",
     "action.dislike": "不喜歡",
     "status.label": "狀態",
@@ -518,6 +546,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.generatingAi": "正在生成透明貓去背圖",
     "status.generatedAi": "已生成 {count} 張透明貓圖",
     "status.galleryLoaded": "圖庫已載入",
+    "status.importing": "正在匯入已選貓圖",
+    "status.imported": "已匯入 {count} 張貓圖",
+    "status.galleryOpened": "圖庫目錄已開啟",
     "status.deleted": "圖片已刪除",
     "status.feedback": "回饋已儲存，後續選擇已調整",
     "status.wallpaperSet": "桌布已設定：{path}",
@@ -568,10 +599,14 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.transparentCutout": "生成無背景貓咪素材，再放到桌面上。",
     "hint.aiScene": "例如：從工作列探頭、坐在圖示旁、趴在桌面邊緣。",
     "gallery.path": "固定圖庫：{path}",
-    "gallery.empty": "受管理圖庫裡還沒有貓圖。",
+    "gallery.empty": "受管理圖庫裡還沒有貓圖。請先匯入高清透明貓圖，或生成 AI 透明貓。",
     "gallery.quality": "{width}x{height} / {source} / 評分 {score}",
     "gallery.lowQuality": "低於 2K 門檻",
     "gallery.rejected": "已被回饋拒用",
+    "gallery.transparent": "透明圖",
+    "gallery.photo": "照片/帶背景",
+    "gallery.selected": "已選取",
+    "gallery.help": "使用者可以自己選圖，匯入後按「使用」。低解析度圖片會在匯入時直接拒絕。",
     "analysis.score": "效果評分 {score}/100",
     "analysis.size": "成品 {width}x{height}，桌面 {virtualWidth}x{virtualHeight}",
     "analysis.clean": "未發現可量化問題。",
@@ -643,6 +678,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.save": "設定を保存",
     "action.select": "使う",
     "action.delete": "削除",
+    "action.import": "猫画像を読み込む",
+    "action.openGallery": "ギャラリーを開く",
+    "action.reloadGallery": "ギャラリーを再読み込み",
     "action.like": "好き",
     "action.dislike": "好きではない",
     "status.label": "状態",
@@ -657,6 +695,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.generatingAi": "透明猫カットアウトを生成中",
     "status.generatedAi": "{count} 枚の透明猫を生成しました",
     "status.galleryLoaded": "ギャラリーを読み込みました",
+    "status.importing": "選択した猫画像を読み込み中",
+    "status.imported": "{count} 枚の猫画像を読み込みました",
+    "status.galleryOpened": "ギャラリーフォルダーを開きました",
     "status.deleted": "画像を削除しました",
     "status.feedback": "フィードバックを保存し、次回選択を調整しました",
     "status.wallpaperSet": "壁紙を設定しました: {path}",
@@ -707,10 +748,14 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.transparentCutout": "背景なしの猫素材を作り、デスクトップに配置します。",
     "hint.aiScene": "例: タスクバーから覗く、アイコン横に座る、デスクトップ端で伸びる。",
     "gallery.path": "固定ギャラリー: {path}",
-    "gallery.empty": "管理ギャラリーに猫画像はまだありません。",
+    "gallery.empty": "管理ギャラリーに猫画像はまだありません。HD の透明猫画像を読み込むか、AI 透明猫を生成してください。",
     "gallery.quality": "{width}x{height} / {source} / score {score}",
     "gallery.lowQuality": "2K 基準未満",
     "gallery.rejected": "フィードバックで拒否済み",
+    "gallery.transparent": "透明",
+    "gallery.photo": "写真/背景あり",
+    "gallery.selected": "選択中",
+    "gallery.help": "ユーザーが画像を選び、読み込み後に「使う」を押せます。低解像度画像は読み込み時に拒否されます。",
     "analysis.score": "効果スコア {score}/100",
     "analysis.size": "出力 {width}x{height}、デスクトップ {virtualWidth}x{virtualHeight}",
     "analysis.clean": "測定可能な問題はありません。",
@@ -782,6 +827,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.save": "설정 저장",
     "action.select": "사용",
     "action.delete": "삭제",
+    "action.import": "고양이 이미지 가져오기",
+    "action.openGallery": "갤러리 폴더 열기",
+    "action.reloadGallery": "갤러리 다시 불러오기",
     "action.like": "좋아요",
     "action.dislike": "싫어요",
     "status.label": "상태",
@@ -796,6 +844,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.generatingAi": "투명 고양이 컷아웃 생성 중",
     "status.generatedAi": "투명 고양이 {count}장 생성됨",
     "status.galleryLoaded": "갤러리 로드됨",
+    "status.importing": "선택한 고양이 이미지 가져오는 중",
+    "status.imported": "고양이 이미지 {count}장 가져옴",
+    "status.galleryOpened": "갤러리 폴더 열림",
     "status.deleted": "이미지 삭제됨",
     "status.feedback": "피드백 저장됨, 다음 선택에 반영됨",
     "status.wallpaperSet": "배경화면 설정됨: {path}",
@@ -846,10 +897,14 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.transparentCutout": "배경 없는 고양이 소재를 만들어 데스크톱에 배치합니다.",
     "hint.aiScene": "예: 작업 표시줄에서 고개 내밀기, 아이콘 옆에 앉기, 화면 가장자리에서 스트레칭.",
     "gallery.path": "고정 갤러리: {path}",
-    "gallery.empty": "관리 갤러리에 아직 고양이 이미지가 없습니다.",
+    "gallery.empty": "관리 갤러리에 아직 고양이 이미지가 없습니다. HD 투명 고양이 이미지를 가져오거나 AI 투명 고양이를 먼저 생성하세요.",
     "gallery.quality": "{width}x{height} / {source} / 점수 {score}",
     "gallery.lowQuality": "2K 기준 미만",
     "gallery.rejected": "피드백으로 거부됨",
+    "gallery.transparent": "투명",
+    "gallery.photo": "사진/배경 있음",
+    "gallery.selected": "선택됨",
+    "gallery.help": "사용자가 직접 이미지를 고른 뒤 가져오고, 사용 버튼을 누를 수 있습니다. 저해상도 이미지는 가져올 때 거부됩니다.",
     "analysis.score": "효과 점수 {score}/100",
     "analysis.size": "결과 {width}x{height}, 데스크톱 {virtualWidth}x{virtualHeight}",
     "analysis.clean": "측정 가능한 문제가 없습니다.",
@@ -930,6 +985,7 @@ function App() {
     top_reasons: [],
   });
   const [feedbackReason, setFeedbackReason] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const locale = resolveLocale(config.language);
   const t = useMemo(() => translator(locale), [locale]);
   const scheduleKind = getScheduleKind(config.schedule);
@@ -1059,6 +1115,40 @@ function App() {
       );
       setGalleryImages(images);
       setStatus(format(t("status.generatedAi"), { count: images.length }));
+      await loadGallery();
+    } catch (error) {
+      setStatus(String(error));
+    }
+  }
+
+  async function importSelectedFiles(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    if (!files.length) return;
+    setStatus("status.importing");
+    try {
+      const payloads: ImportImagePayload[] = await Promise.all(
+        files.map(async (file) => ({
+          file_name: file.name,
+          data_base64: arrayBufferToBase64(await file.arrayBuffer()),
+        })),
+      );
+      const imported = await safeInvoke<GalleryImage[]>(
+        "import_gallery_images",
+        { payloads },
+        [],
+      );
+      setStatus(format(t("status.imported"), { count: imported.length }));
+      await loadGallery();
+    } catch (error) {
+      setStatus(String(error));
+    }
+  }
+
+  async function openGalleryFolder() {
+    try {
+      await safeInvoke("open_gallery_folder");
+      setStatus("status.galleryOpened");
       await loadGallery();
     } catch (error) {
       setStatus(String(error));
@@ -1724,10 +1814,39 @@ function App() {
             <p className="panel-note">
               {format(t("gallery.path"), { path: galleryPath || "-" })}
             </p>
+            <p className="panel-note">{t("gallery.help")}</p>
+            <input
+              ref={fileInputRef}
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden-file-input"
+              multiple
+              onChange={importSelectedFiles}
+              type="file"
+            />
+            <div className="gallery-actions">
+              <button type="button" onClick={() => fileInputRef.current?.click()}>
+                {t("action.import")}
+              </button>
+              <button type="button" onClick={openGalleryFolder}>
+                {t("action.openGallery")}
+              </button>
+              <button type="button" onClick={loadGallery}>
+                {t("action.reloadGallery")}
+              </button>
+            </div>
             <div className="gallery-grid">
               {galleryImages.length === 0 && <p className="panel-note">{t("gallery.empty")}</p>}
-              {galleryImages.slice(0, 12).map((image) => (
-                <article className={image.rejected ? "gallery-item rejected" : "gallery-item"} key={image.path}>
+              {galleryImages.map((image) => (
+                <article
+                  className={[
+                    "gallery-item",
+                    image.rejected ? "rejected" : "",
+                    config.sources.selected_gallery_image === image.path ? "selected" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  key={image.path}
+                >
                   <img alt={image.file_name} src={imageSrc(image.path)} />
                   <strong>{image.file_name}</strong>
                   <small>
@@ -1739,6 +1858,10 @@ function App() {
                     })}
                   </small>
                   <div className="badges">
+                    <span>{image.transparent ? t("gallery.transparent") : t("gallery.photo")}</span>
+                    {config.sources.selected_gallery_image === image.path && (
+                      <span>{t("gallery.selected")}</span>
+                    )}
                     {!image.meets_quality && <span>{t("gallery.lowQuality")}</span>}
                     {image.rejected && <span>{t("gallery.rejected")}</span>}
                   </div>
@@ -1970,6 +2093,16 @@ function format(template: string, values: Record<string, string | number>) {
     (result, [key, value]) => result.replaceAll(`{${key}}`, String(value)),
     template,
   );
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
 }
 
 function hasTauriRuntime() {

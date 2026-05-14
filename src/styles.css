@@ -357,6 +357,29 @@ input[type="range"] {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  max-height: 620px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.gallery-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.gallery-actions button {
+  border: 1px solid rgba(84, 62, 48, 0.24);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #f4dfca;
+  color: #332822;
+  font-weight: 800;
+}
+
+.hidden-file-input {
+  display: none;
 }
 
 .gallery-item {
@@ -366,6 +389,11 @@ input[type="range"] {
   border-radius: 8px;
   padding: 10px;
   background: #fffaf3;
+}
+
+.gallery-item.selected {
+  border-color: rgba(37, 99, 67, 0.62);
+  box-shadow: 0 0 0 2px rgba(37, 99, 67, 0.16);
 }
 
 .gallery-item.rejected {

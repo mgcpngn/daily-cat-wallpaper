@@ -75,6 +75,12 @@ pub struct GalleryImage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImportImagePayload {
+    pub file_name: String,
+    pub data_base64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WallpaperResult {
     pub path: PathBuf,
     pub analysis: WallpaperAnalysis,
@@ -183,13 +189,21 @@ impl AppState {
         self.gallery_dir().join("generated")
     }
 
+    pub fn gallery_import_dir(&self) -> PathBuf {
+        self.gallery_dir().join("imports")
+    }
+
     pub fn list_gallery_images(
         &self,
         quality: &ImageQuality,
     ) -> Result<Vec<GalleryImage>, AppStateError> {
         let mut images = Vec::new();
         let feedback = self.load_feedback()?;
-        for (child, source) in [("downloads", "downloaded"), ("generated", "generated")] {
+        for (child, source) in [
+            ("imports", "imported"),
+            ("downloads", "downloaded"),
+            ("generated", "generated"),
+        ] {
             let dir = self.gallery_dir().join(child);
             let Ok(entries) = fs::read_dir(dir) else {
                 continue;
@@ -227,6 +241,38 @@ impl AppState {
                 .then_with(|| right.path.cmp(&left.path))
         });
         Ok(images)
+    }
+
+    pub fn import_gallery_payloads(
+        &self,
+        payloads: &[ImportImagePayload],
+        quality: &ImageQuality,
+    ) -> Result<Vec<GalleryImage>, AppStateError> {
+        let mut imported = Vec::new();
+        let import_dir = self.gallery_import_dir();
+        for payload in payloads {
+            let encoded = payload
+                .data_base64
+                .rsplit_once(',')
+                .map(|(_, data)| data)
+                .unwrap_or(payload.data_base64.as_str());
+            let bytes = base64::engine::general_purpose::STANDARD.decode(encoded.trim())?;
+            let target = import_target_path(&import_dir, &payload.file_name);
+            if !write_verified_image(&target, &bytes, quality)? {
+                continue;
+            }
+            imported.push(gallery_image_from_path(
+                &target,
+                &payload.file_name,
+                "imported",
+                quality,
+            )?);
+        }
+        if imported.is_empty() {
+            Err(AppStateError::NoCandidate)
+        } else {
+            Ok(imported)
+        }
     }
 
     pub fn delete_gallery_image(&self, path: &Path) -> Result<(), AppStateError> {
@@ -631,11 +677,6 @@ impl AppState {
                 height: Some(quality.preferred_height),
             }]),
             "thecatapi" => self.the_cat_api_candidates(&planner.breeds).await?,
-            "generated" => {
-                let output_dir = self.gallery_generated_dir();
-                let path = generate_fallback_cat_image(&output_dir, quality, &planner.breeds)?;
-                return Ok(Some(path));
-            }
             _ => None,
         };
 
@@ -1090,6 +1131,43 @@ fn write_generated_png(
     Ok(())
 }
 
+fn import_target_path(import_dir: &Path, file_name: &str) -> PathBuf {
+    let original = Path::new(file_name);
+    let stem = original
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(sanitize_file_name)
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or_else(|| "cat-image".to_string());
+    let extension = original
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .filter(|extension| matches!(extension.as_str(), "jpg" | "jpeg" | "png" | "webp"))
+        .unwrap_or_else(|| "png".to_string());
+    import_dir.join(format!("{stem}-{}.{}", unique_suffix(), extension))
+}
+
+fn gallery_image_from_path(
+    path: &Path,
+    display_name: &str,
+    source: &str,
+    quality: &ImageQuality,
+) -> Result<GalleryImage, AppStateError> {
+    let (width, height) = image::image_dimensions(path)?;
+    Ok(GalleryImage {
+        path: path.to_path_buf(),
+        file_name: display_name.to_string(),
+        source: source.to_string(),
+        width,
+        height,
+        meets_quality: width >= quality.min_width && height >= quality.min_height,
+        transparent: image_has_transparency(path),
+        feedback_score: 0,
+        rejected: false,
+    })
+}
+
 fn image_has_transparency(path: &Path) -> bool {
     image::open(path)
         .map(|image| rgba_has_transparency(&image.to_rgba8()))
@@ -1207,6 +1285,7 @@ fn previous_cached_image(
 ) -> Option<PathBuf> {
     let mut candidates = Vec::new();
     for dir in [
+        data_dir.join("cat-gallery").join("imports"),
         data_dir.join("cat-gallery").join("downloads"),
         data_dir.join("cat-gallery").join("generated"),
         data_dir.join("cache"),
@@ -1297,187 +1376,6 @@ fn feedback_key(path: &Path) -> String {
         .to_string_lossy()
         .replace('\\', "/")
         .to_ascii_lowercase()
-}
-
-fn generate_fallback_cat_image(
-    output_dir: &Path,
-    quality: &ImageQuality,
-    breeds: &[String],
-) -> Result<PathBuf, AppStateError> {
-    fs::create_dir_all(output_dir)?;
-    let width = quality.preferred_width.max(quality.min_width).max(2560);
-    let height = quality.preferred_height.max(quality.min_height).max(1440);
-    let mut image = image::RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
-
-    let fur = breed_fallback_color(breeds);
-    let center_x = (width * 3) as i32 / 5;
-    let center_y = height as i32 / 2;
-    let radius_x = width as i32 / 6;
-    let radius_y = height as i32 / 4;
-    fill_triangle(
-        &mut image,
-        (center_x - radius_x, center_y - radius_y / 2),
-        (
-            center_x - radius_x / 2,
-            center_y - radius_y - height as i32 / 12,
-        ),
-        (center_x - radius_x / 8, center_y - radius_y / 4),
-        fur,
-    );
-    fill_triangle(
-        &mut image,
-        (center_x + radius_x, center_y - radius_y / 2),
-        (
-            center_x + radius_x / 2,
-            center_y - radius_y - height as i32 / 12,
-        ),
-        (center_x + radius_x / 8, center_y - radius_y / 4),
-        fur,
-    );
-    fill_ellipse(&mut image, center_x, center_y, radius_x, radius_y, fur);
-    fill_ellipse(
-        &mut image,
-        center_x - radius_x / 3,
-        center_y - radius_y / 8,
-        radius_x / 7,
-        radius_y / 9,
-        image::Rgba([36, 50, 44, 255]),
-    );
-    fill_ellipse(
-        &mut image,
-        center_x + radius_x / 3,
-        center_y - radius_y / 8,
-        radius_x / 7,
-        radius_y / 9,
-        image::Rgba([36, 50, 44, 255]),
-    );
-    fill_ellipse(
-        &mut image,
-        center_x,
-        center_y + radius_y / 8,
-        radius_x / 10,
-        radius_y / 12,
-        image::Rgba([88, 48, 52, 255]),
-    );
-    for stripe in [-2, -1, 0, 1, 2] {
-        draw_line(
-            &mut image,
-            center_x + stripe * radius_x / 8,
-            center_y - radius_y / 2,
-            center_x + stripe * radius_x / 12,
-            center_y - radius_y / 5,
-            image::Rgba([160, 84, 42, 255]),
-        );
-    }
-
-    let output_path = output_dir.join(format!("generated-cat-{}.png", unique_suffix()));
-    image::DynamicImage::ImageRgba8(image).save(&output_path)?;
-    Ok(output_path)
-}
-
-fn breed_fallback_color(breeds: &[String]) -> image::Rgba<u8> {
-    let breed = breeds
-        .iter()
-        .map(|breed| breed.trim().to_ascii_lowercase())
-        .find(|breed| breed != "mixed")
-        .unwrap_or_default();
-    if breed.contains("orange") || breed.contains("tabby") {
-        image::Rgba([226, 132, 55, 255])
-    } else if breed.contains("black") {
-        image::Rgba([42, 38, 36, 255])
-    } else if breed.contains("white") {
-        image::Rgba([238, 233, 220, 255])
-    } else if breed.contains("calico") {
-        image::Rgba([218, 170, 112, 255])
-    } else {
-        image::Rgba([174, 130, 92, 255])
-    }
-}
-
-fn fill_ellipse(
-    image: &mut image::RgbaImage,
-    center_x: i32,
-    center_y: i32,
-    radius_x: i32,
-    radius_y: i32,
-    color: image::Rgba<u8>,
-) {
-    for y in (center_y - radius_y).max(0)..=(center_y + radius_y).min(image.height() as i32 - 1) {
-        for x in (center_x - radius_x).max(0)..=(center_x + radius_x).min(image.width() as i32 - 1)
-        {
-            let dx = (x - center_x) as f32 / radius_x.max(1) as f32;
-            let dy = (y - center_y) as f32 / radius_y.max(1) as f32;
-            if dx * dx + dy * dy <= 1.0 {
-                image.put_pixel(x as u32, y as u32, color);
-            }
-        }
-    }
-}
-
-fn fill_triangle(
-    image: &mut image::RgbaImage,
-    a: (i32, i32),
-    b: (i32, i32),
-    c: (i32, i32),
-    color: image::Rgba<u8>,
-) {
-    let min_x = a.0.min(b.0).min(c.0).max(0);
-    let max_x = a.0.max(b.0).max(c.0).min(image.width() as i32 - 1);
-    let min_y = a.1.min(b.1).min(c.1).max(0);
-    let max_y = a.1.max(b.1).max(c.1).min(image.height() as i32 - 1);
-    let area = edge(a, b, c);
-    if area == 0 {
-        return;
-    }
-    for y in min_y..=max_y {
-        for x in min_x..=max_x {
-            let p = (x, y);
-            let w0 = edge(b, c, p);
-            let w1 = edge(c, a, p);
-            let w2 = edge(a, b, p);
-            if (w0 >= 0 && w1 >= 0 && w2 >= 0) || (w0 <= 0 && w1 <= 0 && w2 <= 0) {
-                image.put_pixel(x as u32, y as u32, color);
-            }
-        }
-    }
-}
-
-fn edge(a: (i32, i32), b: (i32, i32), c: (i32, i32)) -> i32 {
-    (c.0 - a.0) * (b.1 - a.1) - (c.1 - a.1) * (b.0 - a.0)
-}
-
-fn draw_line(
-    image: &mut image::RgbaImage,
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    color: image::Rgba<u8>,
-) {
-    let dx = (x1 - x0).abs();
-    let sx = if x0 < x1 { 1 } else { -1 };
-    let dy = -(y1 - y0).abs();
-    let sy = if y0 < y1 { 1 } else { -1 };
-    let mut error = dx + dy;
-    let mut x = x0;
-    let mut y = y0;
-    loop {
-        if x >= 0 && y >= 0 && x < image.width() as i32 && y < image.height() as i32 {
-            image.put_pixel(x as u32, y as u32, color);
-        }
-        if x == x1 && y == y1 {
-            break;
-        }
-        let e2 = 2 * error;
-        if e2 >= dy {
-            error += dy;
-            x += sx;
-        }
-        if e2 <= dx {
-            error += dx;
-            y += sy;
-        }
-    }
 }
 
 fn compose_display_wallpaper(
@@ -1913,19 +1811,47 @@ mod tests {
     }
 
     #[test]
-    fn generated_fallback_creates_hd_cat_image() {
+    fn import_gallery_payloads_writes_selected_browser_files() {
         let dir = tempdir().unwrap();
+        let state = test_state(dir.path());
+        let mut bytes = Cursor::new(Vec::new());
+        transparent_test_cat(2560, 1440, 240, 120)
+            .write_to(&mut bytes, ImageFormat::Png)
+            .unwrap();
 
-        let path = generate_fallback_cat_image(
-            dir.path(),
+        let imported = state
+            .import_gallery_payloads(
+                &[ImportImagePayload {
+                    file_name: "picked-cat.png".to_string(),
+                    data_base64: base64::engine::general_purpose::STANDARD
+                        .encode(bytes.into_inner()),
+                }],
+                &ImageQuality::default(),
+            )
+            .unwrap();
+
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].file_name, "picked-cat.png");
+        assert!(imported[0].transparent);
+        assert!(imported[0].path.starts_with(state.gallery_import_dir()));
+    }
+
+    #[test]
+    fn import_gallery_payloads_rejects_low_resolution_browser_files() {
+        let dir = tempdir().unwrap();
+        let state = test_state(dir.path());
+
+        let result = state.import_gallery_payloads(
+            &[ImportImagePayload {
+                file_name: "small-cat.jpg".to_string(),
+                data_base64: base64::engine::general_purpose::STANDARD
+                    .encode(encoded_test_image(1280, 720)),
+            }],
             &ImageQuality::default(),
-            &["orange tabby".to_string()],
-        )
-        .unwrap();
-        let image = image::open(path).unwrap().to_rgb8();
+        );
 
-        assert_eq!(image.dimensions(), (3840, 2160));
-        assert!(contains_near_rgb(&image, Rgb([226, 132, 55]), 12));
+        assert!(matches!(result, Err(AppStateError::NoCandidate)));
+        assert!(!state.gallery_import_dir().exists());
     }
 
     #[test]
@@ -2157,15 +2083,5 @@ mod tests {
 
     fn contains_rgb(image: &RgbImage, expected: Rgb<u8>) -> bool {
         image.pixels().any(|pixel| pixel == &expected)
-    }
-
-    fn contains_near_rgb(image: &RgbImage, expected: Rgb<u8>, tolerance: u8) -> bool {
-        image.pixels().any(|pixel| {
-            pixel
-                .0
-                .iter()
-                .zip(expected.0.iter())
-                .all(|(actual, expected)| actual.abs_diff(*expected) <= tolerance)
-        })
     }
 }

@@ -6,10 +6,11 @@ use daily_cat_core::{
     WallpaperBackend,
 };
 use state::{
-    AppState, DisplayGeometry, FeedbackInput, GalleryImage, LearningSummary, WallpaperAnalysis,
-    WallpaperResult,
+    AppState, DisplayGeometry, FeedbackInput, GalleryImage, ImportImagePayload, LearningSummary,
+    WallpaperAnalysis, WallpaperResult,
 };
 use std::path::PathBuf;
+use std::process::Command;
 use tauri::{AppHandle, State};
 use wallpaper_backend::NativeWallpaperBackend;
 
@@ -112,6 +113,31 @@ fn delete_gallery_image(state: State<'_, AppState>, path: PathBuf) -> Result<(),
 #[tauri::command]
 fn gallery_location(state: State<'_, AppState>) -> PathBuf {
     state.gallery_dir()
+}
+
+#[tauri::command]
+fn open_gallery_folder(state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.gallery_dir();
+    std::fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+    open_directory(&path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn import_gallery_images(
+    state: State<'_, AppState>,
+    payloads: Vec<ImportImagePayload>,
+) -> Result<Vec<GalleryImage>, String> {
+    let config = state.load_config().map_err(|error| error.to_string())?;
+    state
+        .import_gallery_payloads(&payloads, &config.image_quality)
+        .map_err(|error| {
+            if error.to_string() == "no image candidate could be resolved" {
+                "No selected image met the 2K quality gate. Choose a transparent or HD cat image."
+                    .to_string()
+            } else {
+                error.to_string()
+            }
+        })
 }
 
 #[tauri::command]
@@ -247,6 +273,22 @@ fn monitor_geometries(app: &AppHandle) -> Vec<DisplayGeometry> {
         .unwrap_or_default()
 }
 
+fn open_directory(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer").arg(path).spawn()?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(path).spawn()?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open").arg(path).spawn()?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -262,6 +304,8 @@ pub fn run() {
             list_gallery_images,
             delete_gallery_image,
             gallery_location,
+            open_gallery_folder,
+            import_gallery_images,
             select_gallery_image,
             generate_ai_cat_images,
             record_wallpaper_feedback,

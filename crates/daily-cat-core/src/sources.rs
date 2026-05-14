@@ -86,9 +86,12 @@ impl SourcePlanner {
         if self.cataas_enabled {
             sources.push("cataas".to_string());
         }
-        sources.push("generated".to_string());
 
-        Ok(sources)
+        if sources.is_empty() {
+            Err(SourceError::NoSources)
+        } else {
+            Ok(sources)
+        }
     }
 }
 

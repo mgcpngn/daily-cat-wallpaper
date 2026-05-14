@@ -274,9 +274,26 @@ impl Default for AiGenerationConfig {
 
 impl SourceConfig {
     pub fn has_any_source(&self) -> bool {
-        // The generated fallback is always available, so users can disable every
-        // network source without making refresh impossible.
-        true
+        !self.local_dirs.is_empty()
+            || self.wikimedia_commons
+            || self.cataas
+            || self.the_cat_api
+            || self
+                .pixabay_api_key
+                .as_deref()
+                .is_some_and(|key| !key.trim().is_empty())
+            || self
+                .magnific_api_key
+                .as_deref()
+                .is_some_and(|key| !key.trim().is_empty())
+            || self
+                .pexels_api_key
+                .as_deref()
+                .is_some_and(|key| !key.trim().is_empty())
+            || self
+                .selected_gallery_image
+                .as_deref()
+                .is_some_and(|path| !path.trim().is_empty())
     }
 }
 

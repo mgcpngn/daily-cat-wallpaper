@@ -1,5 +1,6 @@
 use daily_cat_core::sources::{
     pixabay_search_query, the_cat_api_breed_ids, transparent_cat_prompt, wikimedia_search_query,
+    SourceError,
 };
 use daily_cat_core::{
     AppConfig, Canvas, CatCountStrategy, ConfigError, ImageQuality, LanguagePreference,
@@ -116,13 +117,7 @@ fn source_planner_prefers_local_then_cataas_then_the_cat_api() {
 
     assert_eq!(
         planner.ordered_sources().unwrap(),
-        vec![
-            "local:C:/cats",
-            "wikimedia",
-            "thecatapi",
-            "cataas",
-            "generated"
-        ]
+        vec!["local:C:/cats", "wikimedia", "thecatapi", "cataas"]
     );
 }
 
@@ -136,7 +131,7 @@ fn source_planner_errors_when_no_sources_are_enabled() {
         ..SourcePlanner::default()
     };
 
-    assert_eq!(planner.ordered_sources().unwrap(), vec!["generated"]);
+    assert_eq!(planner.ordered_sources(), Err(SourceError::NoSources));
 }
 
 #[test]
@@ -172,14 +167,7 @@ fn advanced_api_keys_enable_premium_sources_before_public_sources() {
 
     assert_eq!(
         planner.ordered_sources().unwrap(),
-        vec![
-            "magnific",
-            "pixabay",
-            "wikimedia",
-            "thecatapi",
-            "cataas",
-            "generated"
-        ]
+        vec!["magnific", "pixabay", "wikimedia", "thecatapi", "cataas"]
     );
 }
 
