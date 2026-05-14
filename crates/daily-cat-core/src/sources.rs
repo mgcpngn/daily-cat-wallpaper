@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
 
-use crate::config::CatImageType;
+use crate::config::{AppConfig, CatImageType};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CatCandidate {
@@ -119,6 +119,41 @@ pub fn pixabay_search_query(breeds: &[String], image_types: &[CatImageType]) -> 
 
 pub fn pexels_search_query(breeds: &[String], image_types: &[CatImageType]) -> String {
     format!("{} wallpaper", cat_search_query(breeds, image_types))
+}
+
+pub fn transparent_cat_prompt(config: &AppConfig) -> String {
+    let breed = config
+        .breeds
+        .iter()
+        .map(|breed| normalize_breed(breed))
+        .find(|breed| breed != "mixed")
+        .unwrap_or_else(|| "mixed breed cat".to_string());
+    let moods = config
+        .image_types
+        .iter()
+        .map(|image_type| match image_type {
+            CatImageType::Healing => "calm and comforting",
+            CatImageType::Funny => "playful and expressive",
+            CatImageType::Loaf => "loaf pose",
+            CatImageType::Kitten => "kitten-like charm",
+            CatImageType::Sleepy => "sleepy and relaxed",
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let scene = config.ai_generation.scene.trim();
+    let scene = if scene.is_empty() {
+        "sitting naturally on the desktop edge"
+    } else {
+        scene
+    };
+
+    format!(
+        "Create one lifelike full-body {breed} cat as a transparent PNG cutout. \
+         The cat should feel like a small pet living on a computer desktop: {scene}. \
+         Mood cues: {moods}. No room, no wall, no floor, no props, no text, no frame, \
+         no shadow baked into a background. Isolated subject only, clean alpha channel, \
+         detailed fur, natural paws, ears, whiskers, and tail, complete body visible."
+    )
 }
 
 fn cat_search_query(breeds: &[String], image_types: &[CatImageType]) -> String {

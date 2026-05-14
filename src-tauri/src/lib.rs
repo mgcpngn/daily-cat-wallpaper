@@ -5,7 +5,10 @@ use daily_cat_core::{
     AppConfig, BackendCapabilities, Canvas, LayoutEngine, Rect, SafeArea, SourcePlanner,
     WallpaperBackend,
 };
-use state::{AppState, DisplayGeometry};
+use state::{
+    AppState, DisplayGeometry, FeedbackInput, GalleryImage, LearningSummary, WallpaperAnalysis,
+    WallpaperResult,
+};
 use std::path::PathBuf;
 use tauri::{AppHandle, State};
 use wallpaper_backend::NativeWallpaperBackend;
@@ -45,32 +48,141 @@ fn display_summary(app: AppHandle) -> Vec<DisplayGeometry> {
 }
 
 #[tauri::command]
-async fn refresh_wallpaper(app: AppHandle, state: State<'_, AppState>) -> Result<PathBuf, String> {
+async fn refresh_wallpaper(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<WallpaperResult, String> {
     let config = state.load_config().map_err(|error| error.to_string())?;
     let source_planner = source_planner_from_config(&config);
     let displays = display_geometries_or_default(&app, &config);
     let assignments = LayoutEngine.cat_assignments(displays.len(), &config);
     let unique_cat_count = assignments.iter().max().map(|index| index + 1).unwrap_or(1);
-    let image_paths = state
-        .resolve_wallpaper_images(&source_planner, &config.image_quality, unique_cat_count)
-        .await
-        .map_err(|error| error.to_string())?;
-    let image_path = if displays.len() > 1 {
-        state
-            .compose_wallpaper(&displays, &image_paths, &assignments)
-            .map_err(|error| error.to_string())?
+    let (image_paths, effective_assignments) = if let Some(selected) = config
+        .sources
+        .selected_gallery_image
+        .as_deref()
+        .map(PathBuf::from)
+        .filter(|path| {
+            state
+                .gallery_image_is_usable(path, &config.image_quality)
+                .unwrap_or(false)
+        }) {
+        (vec![selected], vec![0; displays.len().max(1)])
     } else {
-        image_paths
-            .first()
-            .cloned()
-            .ok_or_else(|| "no image candidate could be resolved".to_string())?
+        (
+            state
+                .resolve_wallpaper_images(&source_planner, &config.image_quality, unique_cat_count)
+                .await
+                .map_err(|error| error.to_string())?,
+            assignments,
+        )
     };
+    let image_path = state
+        .compose_wallpaper(&displays, &image_paths, &effective_assignments)
+        .map_err(|error| error.to_string())?;
+    let analysis = state
+        .analyze_wallpaper(&image_path, &displays, &image_paths, &config.image_quality)
+        .map_err(|error| error.to_string())?;
 
     NativeWallpaperBackend::new()
         .set_wallpaper(&image_path)
         .map_err(|error| error.to_string())?;
 
-    Ok(image_path)
+    Ok(WallpaperResult {
+        path: image_path,
+        analysis,
+    })
+}
+
+#[tauri::command]
+fn list_gallery_images(state: State<'_, AppState>) -> Result<Vec<GalleryImage>, String> {
+    let config = state.load_config().map_err(|error| error.to_string())?;
+    state
+        .list_gallery_images(&config.image_quality)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn delete_gallery_image(state: State<'_, AppState>, path: PathBuf) -> Result<(), String> {
+    state
+        .delete_gallery_image(&path)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn gallery_location(state: State<'_, AppState>) -> PathBuf {
+    state.gallery_dir()
+}
+
+#[tauri::command]
+async fn select_gallery_image(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: PathBuf,
+) -> Result<WallpaperResult, String> {
+    let mut config = state.load_config().map_err(|error| error.to_string())?;
+    if !state
+        .gallery_image_is_usable(&path, &config.image_quality)
+        .map_err(|error| error.to_string())?
+    {
+        return Err("selected cat image does not meet the 2K quality gate".to_string());
+    }
+    config.sources.selected_gallery_image = Some(path.to_string_lossy().to_string());
+    state
+        .save_config(config)
+        .map_err(|error| error.to_string())?;
+    refresh_wallpaper(app, state).await
+}
+
+#[tauri::command]
+async fn generate_ai_cat_images(
+    state: State<'_, AppState>,
+    count: usize,
+) -> Result<Vec<GalleryImage>, String> {
+    let mut config = state.load_config().map_err(|error| error.to_string())?;
+    let paths = state
+        .generate_ai_cat_images(&config, count)
+        .await
+        .map_err(|error| error.to_string())?;
+    if config.ai_generation.auto_use_generated {
+        if let Some(path) = paths.first() {
+            config.sources.selected_gallery_image = Some(path.to_string_lossy().to_string());
+            state
+                .save_config(config.clone())
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    state
+        .list_gallery_images(&config.image_quality)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn record_wallpaper_feedback(
+    state: State<'_, AppState>,
+    input: FeedbackInput,
+) -> Result<LearningSummary, String> {
+    state
+        .record_feedback(input)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn learning_summary(state: State<'_, AppState>) -> Result<LearningSummary, String> {
+    state.learning_summary().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn analyze_wallpaper(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: PathBuf,
+) -> Result<WallpaperAnalysis, String> {
+    let config = state.load_config().map_err(|error| error.to_string())?;
+    let displays = display_geometries_or_default(&app, &config);
+    state
+        .analyze_wallpaper(&path, &displays, &[], &config.image_quality)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -146,7 +258,15 @@ pub fn run() {
             platform_capabilities,
             display_summary,
             refresh_wallpaper,
-            prefetch_wallpapers
+            prefetch_wallpapers,
+            list_gallery_images,
+            delete_gallery_image,
+            gallery_location,
+            select_gallery_image,
+            generate_ai_cat_images,
+            record_wallpaper_feedback,
+            learning_summary,
+            analyze_wallpaper
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Daily Cat Wallpaper");

@@ -215,6 +215,8 @@ h1 {
 select,
 input[type="time"],
 input[type="number"],
+input[type="password"],
+.field input[type="text"],
 .inline-field input {
   width: 100%;
   border: 1px solid rgba(84, 62, 48, 0.25);
@@ -336,6 +338,102 @@ input[type="range"] {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
+}
+
+.panel-action {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.panel-note {
+  margin: 0 0 12px;
+  color: #6f5d53;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.gallery-item {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(84, 62, 48, 0.18);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fffaf3;
+}
+
+.gallery-item.rejected {
+  opacity: 0.62;
+}
+
+.gallery-item img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  border-radius: 6px;
+  background:
+    linear-gradient(45deg, rgba(80, 64, 48, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(80, 64, 48, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(80, 64, 48, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(80, 64, 48, 0.08) 75%);
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
+  background-size: 20px 20px;
+}
+
+.gallery-item strong,
+.gallery-item small {
+  overflow-wrap: anywhere;
+}
+
+.badges,
+.mini-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.badges span {
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: #ead2bc;
+  color: #6b3325;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mini-actions button {
+  flex: 1 1 80px;
+  border: 1px solid rgba(84, 62, 48, 0.24);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f4dfca;
+  color: #332822;
+  font-weight: 800;
+}
+
+.analysis-box {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(84, 62, 48, 0.18);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fffaf3;
+}
+
+.analysis-box ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: #6b3325;
 }
 
 @keyframes breathe {

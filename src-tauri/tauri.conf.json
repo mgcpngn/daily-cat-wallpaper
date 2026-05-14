@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Daily Cat Wallpaper",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.dailycat.wallpaper",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -27,6 +27,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
     "category": "Lifestyle",
     "shortDescription": "Automatic cat wallpaper freedom for your desktop.",
     "longDescription": "Daily Cat Wallpaper is a cross-platform Rust desktop app that rotates healing cat wallpapers, supports breed and interaction preferences, and keeps Windows, macOS, and Linux desktops cozy."

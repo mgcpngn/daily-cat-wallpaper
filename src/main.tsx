@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import "./styles.css";
 
 type Locale = "en" | "zh-Hans" | "zh-Hant" | "ja" | "ko";
@@ -14,6 +14,7 @@ type LanguagePreference =
 type CatCountStrategy = "MatchDisplays" | "Fixed";
 type CatImageType = "Healing" | "Funny" | "Loaf" | "Kitten" | "Sleepy";
 type PlatformMode = "Automatic" | "StaticOnly" | "InteractionBeta";
+type AiImageProvider = "OpenAi" | "GoogleNanoBananaPro";
 type ScheduleConfig =
   | "OnLogin"
   | "ManualOnly"
@@ -50,6 +51,18 @@ type AppConfig = {
     magnific_api_key: string | null;
     pexels_api_key: string | null;
     unsplash_access_key: string | null;
+    selected_gallery_image: string | null;
+  };
+  ai_generation: {
+    provider: AiImageProvider;
+    openai_api_key: string | null;
+    google_api_key: string | null;
+    openai_model: string;
+    google_model: string;
+    scene: string;
+    count: number;
+    transparent_cutout: boolean;
+    auto_use_generated: boolean;
   };
   platform_mode: PlatformMode;
   launch_at_login: boolean;
@@ -75,6 +88,54 @@ type DisplayGeometry = {
   y: number;
   width: number;
   height: number;
+};
+
+type WallpaperIssue =
+  | "NotVirtualDesktopSized"
+  | "BelowMinimumResolution"
+  | "PlaceholderGeneratedArt"
+  | "NonTransparentPetAsset"
+  | "SubjectTouchesImageEdge"
+  | "PreferenceMatchUnverified";
+
+type WallpaperAnalysis = {
+  wallpaper_path: string;
+  width: number;
+  height: number;
+  virtual_width: number;
+  virtual_height: number;
+  fills_virtual_desktop: boolean;
+  meets_resolution: boolean;
+  uses_placeholder_art: boolean;
+  transparent_pet_asset: boolean;
+  likely_cropped: boolean;
+  unverified_preference_match: boolean;
+  issues: WallpaperIssue[];
+  score: number;
+};
+
+type WallpaperResult = {
+  path: string;
+  analysis: WallpaperAnalysis;
+};
+
+type GalleryImage = {
+  path: string;
+  file_name: string;
+  source: string;
+  width: number;
+  height: number;
+  meets_quality: boolean;
+  transparent: boolean;
+  feedback_score: number;
+  rejected: boolean;
+};
+
+type LearningSummary = {
+  liked: number;
+  disliked: number;
+  rejected_images: number;
+  top_reasons: string[];
 };
 
 declare global {
@@ -135,6 +196,18 @@ const defaultConfig: AppConfig = {
     magnific_api_key: null,
     pexels_api_key: null,
     unsplash_access_key: null,
+    selected_gallery_image: null,
+  },
+  ai_generation: {
+    provider: "OpenAi",
+    openai_api_key: null,
+    google_api_key: null,
+    openai_model: "gpt-image-1.5",
+    google_model: "gemini-3-pro-image-preview",
+    scene: "sitting naturally on the desktop edge",
+    count: 4,
+    transparent_cutout: true,
+    auto_use_generated: true,
   },
   platform_mode: "Automatic",
   launch_at_login: true,
@@ -148,7 +221,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
       "Choose language, cat sources, HD quality, monitor behavior, and interaction style. The Rust core takes over wallpaper refreshes.",
     "action.refresh": "Refresh now",
     "action.prefetch": "Cache HD pack",
+    "action.generateAi": "Generate transparent cats",
     "action.save": "Save preferences",
+    "action.select": "Use",
+    "action.delete": "Delete",
+    "action.like": "Like",
+    "action.dislike": "Dislike",
     "status.label": "Status",
     "status.loading": "Loading configuration",
     "status.ready": "Ready",
@@ -158,6 +236,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.refreshing": "Refreshing wallpaper",
     "status.prefetching": "Caching HD cat pack",
     "status.prefetched": "Cached {count} HD cat images",
+    "status.generatingAi": "Generating transparent cat cutouts",
+    "status.generatedAi": "Generated {count} transparent cats",
+    "status.galleryLoaded": "Gallery loaded",
+    "status.deleted": "Deleted image",
+    "status.feedback": "Feedback saved, future selection adjusted",
     "status.wallpaperSet": "Wallpaper set: {path}",
     "status.platformDetecting": "Detecting platform",
     "status.platform": "{platform}{beta} / static {static}",
@@ -175,6 +258,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "panel.interactions": "Interactions",
     "panel.schedule": "Refresh frequency",
     "panel.sources": "Sources",
+    "panel.ai": "AI transparent cats",
+    "panel.gallery": "Cat gallery",
+    "panel.analysis": "Desktop effect check",
     "panel.platform": "Platform",
     "field.language": "Display language",
     "language.auto": "Auto from system locale",
@@ -193,7 +279,32 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.minResolution": "Minimum accepted resolution",
     "field.preferredResolution": "Preferred online request size",
     "field.lowResFallback": "Allow low-resolution fallback",
-    "hint.lowResFallback": "Keep disabled for HD-only wallpapers.",
+    "hint.lowResFallback": "Hard disabled: images below 2560x1440 are rejected before saving.",
+    "field.aiProvider": "AI provider",
+    "field.openaiKey": "OpenAI API key",
+    "field.googleKey": "Google API key",
+    "field.aiScene": "Desktop pet scene",
+    "field.aiCount": "Images to generate",
+    "field.transparentCutout": "Transparent PNG cutout",
+    "field.autoUseGenerated": "Auto-use newest generated cat",
+    "hint.transparentCutout": "Creates a no-background cat asset that can be placed on the desktop.",
+    "hint.aiScene": "Example: peeking from the taskbar, sitting beside icons, stretching on the desktop edge.",
+    "gallery.path": "Fixed gallery: {path}",
+    "gallery.empty": "No cat images in the managed gallery yet.",
+    "gallery.quality": "{width}x{height} / {source} / score {score}",
+    "gallery.lowQuality": "Below 2K gate",
+    "gallery.rejected": "Rejected by feedback",
+    "analysis.score": "Effect score {score}/100",
+    "analysis.size": "Final {width}x{height}, desktop {virtualWidth}x{virtualHeight}",
+    "analysis.clean": "No measurable issues found.",
+    "issue.NotVirtualDesktopSized": "Final image does not fill the actual virtual desktop.",
+    "issue.BelowMinimumResolution": "Final image is below the 2K quality gate.",
+    "issue.PlaceholderGeneratedArt": "Using placeholder generated art instead of a real or AI cat asset.",
+    "issue.NonTransparentPetAsset": "Source is not a transparent pet cutout.",
+    "issue.SubjectTouchesImageEdge": "Transparent cat touches the image edge, likely cropped.",
+    "issue.PreferenceMatchUnverified": "Breed or mood match is not independently verified.",
+    "learning.summary": "{liked} liked, {disliked} disliked, {rejected} rejected",
+    "feedback.reason": "Reason, e.g. wrong breed, too small, cropped",
     "schedule.daily": "Daily",
     "schedule.everyHours": "Every N hours",
     "schedule.onLogin": "On login",
@@ -250,7 +361,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hero.lead": "选择语言、猫图来源、高清质量、多屏策略和互动方式。Rust 核心负责自动刷新和壁纸接管。",
     "action.refresh": "立即换猫",
     "action.prefetch": "缓存高清猫图包",
+    "action.generateAi": "生成透明猫",
     "action.save": "保存配置",
+    "action.select": "使用",
+    "action.delete": "删除",
+    "action.like": "喜欢",
+    "action.dislike": "不喜欢",
     "status.label": "状态",
     "status.loading": "正在加载配置",
     "status.ready": "已就绪",
@@ -260,6 +376,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.refreshing": "正在刷新壁纸",
     "status.prefetching": "正在缓存高清猫图包",
     "status.prefetched": "已缓存 {count} 张高清猫图",
+    "status.generatingAi": "正在生成透明猫抠图",
+    "status.generatedAi": "已生成 {count} 张透明猫图",
+    "status.galleryLoaded": "图库已加载",
+    "status.deleted": "图片已删除",
+    "status.feedback": "反馈已保存，后续选择已调整",
     "status.wallpaperSet": "壁纸已设置：{path}",
     "status.platformDetecting": "正在检测平台",
     "status.platform": "{platform}{beta} / 静态壁纸 {static}",
@@ -276,6 +397,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "panel.interactions": "互动",
     "panel.schedule": "刷新频次",
     "panel.sources": "图片来源",
+    "panel.ai": "AI 透明猫",
+    "panel.gallery": "猫图图库",
+    "panel.analysis": "桌面效果体检",
     "panel.platform": "平台",
     "field.language": "显示语言",
     "language.auto": "跟随系统语言",
@@ -294,7 +418,32 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.minResolution": "最低接受分辨率",
     "field.preferredResolution": "在线请求优先尺寸",
     "field.lowResFallback": "允许低分辨率兜底",
-    "hint.lowResFallback": "关闭时只接受高清壁纸。",
+    "hint.lowResFallback": "已硬性关闭：低于 2560x1440 的图片不会保存。",
+    "field.aiProvider": "AI 提供方",
+    "field.openaiKey": "OpenAI API Key",
+    "field.googleKey": "Google API Key",
+    "field.aiScene": "桌面宠物场景",
+    "field.aiCount": "生成数量",
+    "field.transparentCutout": "透明 PNG 抠图",
+    "field.autoUseGenerated": "自动使用最新生成猫图",
+    "hint.transparentCutout": "生成没有背景的猫咪素材，再放到桌面上。",
+    "hint.aiScene": "例如：从任务栏探头、坐在图标旁、趴在桌面边缘。",
+    "gallery.path": "固定图库：{path}",
+    "gallery.empty": "托管图库里还没有猫图。",
+    "gallery.quality": "{width}x{height} / {source} / 评分 {score}",
+    "gallery.lowQuality": "低于 2K 门槛",
+    "gallery.rejected": "已被反馈拒用",
+    "analysis.score": "效果评分 {score}/100",
+    "analysis.size": "成品 {width}x{height}，桌面 {virtualWidth}x{virtualHeight}",
+    "analysis.clean": "未发现可量化问题。",
+    "issue.NotVirtualDesktopSized": "成品图没有铺满实际虚拟桌面。",
+    "issue.BelowMinimumResolution": "成品图低于 2K 质量门槛。",
+    "issue.PlaceholderGeneratedArt": "使用了占位生成图，不是真实或 AI 猫素材。",
+    "issue.NonTransparentPetAsset": "素材不是透明桌面宠物抠图。",
+    "issue.SubjectTouchesImageEdge": "透明猫碰到图片边缘，可能被裁切。",
+    "issue.PreferenceMatchUnverified": "品种或情绪匹配尚未被独立验证。",
+    "learning.summary": "{liked} 个喜欢，{disliked} 个不喜欢，{rejected} 个拒用",
+    "feedback.reason": "原因，例如品种不对、太小、被裁切",
     "schedule.daily": "每天",
     "schedule.everyHours": "每 N 小时",
     "schedule.onLogin": "登录时",
@@ -351,7 +500,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hero.lead": "選擇語言、貓圖來源、高清品質、多螢幕策略和互動方式。Rust 核心負責自動刷新和桌布接管。",
     "action.refresh": "立即換貓",
     "action.prefetch": "快取高清貓圖包",
+    "action.generateAi": "生成透明貓",
     "action.save": "儲存設定",
+    "action.select": "使用",
+    "action.delete": "刪除",
+    "action.like": "喜歡",
+    "action.dislike": "不喜歡",
     "status.label": "狀態",
     "status.loading": "正在載入設定",
     "status.ready": "已就緒",
@@ -361,6 +515,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.refreshing": "正在刷新桌布",
     "status.prefetching": "正在快取高清貓圖包",
     "status.prefetched": "已快取 {count} 張高清貓圖",
+    "status.generatingAi": "正在生成透明貓去背圖",
+    "status.generatedAi": "已生成 {count} 張透明貓圖",
+    "status.galleryLoaded": "圖庫已載入",
+    "status.deleted": "圖片已刪除",
+    "status.feedback": "回饋已儲存，後續選擇已調整",
     "status.wallpaperSet": "桌布已設定：{path}",
     "status.platformDetecting": "正在偵測平台",
     "status.platform": "{platform}{beta} / 靜態桌布 {static}",
@@ -377,6 +536,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "panel.interactions": "互動",
     "panel.schedule": "刷新頻率",
     "panel.sources": "圖片來源",
+    "panel.ai": "AI 透明貓",
+    "panel.gallery": "貓圖圖庫",
+    "panel.analysis": "桌面效果檢查",
     "panel.platform": "平台",
     "field.language": "顯示語言",
     "language.auto": "跟隨系統語言",
@@ -395,7 +557,32 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.minResolution": "最低接受解析度",
     "field.preferredResolution": "線上請求優先尺寸",
     "field.lowResFallback": "允許低解析度備援",
-    "hint.lowResFallback": "關閉時只接受高清桌布。",
+    "hint.lowResFallback": "已硬性關閉：低於 2560x1440 的圖片不會儲存。",
+    "field.aiProvider": "AI 提供方",
+    "field.openaiKey": "OpenAI API Key",
+    "field.googleKey": "Google API Key",
+    "field.aiScene": "桌面寵物場景",
+    "field.aiCount": "生成數量",
+    "field.transparentCutout": "透明 PNG 去背",
+    "field.autoUseGenerated": "自動使用最新生成貓圖",
+    "hint.transparentCutout": "生成無背景貓咪素材，再放到桌面上。",
+    "hint.aiScene": "例如：從工作列探頭、坐在圖示旁、趴在桌面邊緣。",
+    "gallery.path": "固定圖庫：{path}",
+    "gallery.empty": "受管理圖庫裡還沒有貓圖。",
+    "gallery.quality": "{width}x{height} / {source} / 評分 {score}",
+    "gallery.lowQuality": "低於 2K 門檻",
+    "gallery.rejected": "已被回饋拒用",
+    "analysis.score": "效果評分 {score}/100",
+    "analysis.size": "成品 {width}x{height}，桌面 {virtualWidth}x{virtualHeight}",
+    "analysis.clean": "未發現可量化問題。",
+    "issue.NotVirtualDesktopSized": "成品圖沒有鋪滿實際虛擬桌面。",
+    "issue.BelowMinimumResolution": "成品圖低於 2K 品質門檻。",
+    "issue.PlaceholderGeneratedArt": "使用了佔位生成圖，不是真實或 AI 貓素材。",
+    "issue.NonTransparentPetAsset": "素材不是透明桌面寵物去背圖。",
+    "issue.SubjectTouchesImageEdge": "透明貓碰到圖片邊緣，可能被裁切。",
+    "issue.PreferenceMatchUnverified": "品種或情緒匹配尚未被獨立驗證。",
+    "learning.summary": "{liked} 個喜歡，{disliked} 個不喜歡，{rejected} 個拒用",
+    "feedback.reason": "原因，例如品種不對、太小、被裁切",
     "schedule.daily": "每天",
     "schedule.everyHours": "每 N 小時",
     "schedule.onLogin": "登入時",
@@ -452,7 +639,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hero.lead": "言語、猫画像ソース、HD 品質、マルチモニター動作、インタラクションを選べます。Rust コアが壁紙更新を担当します。",
     "action.refresh": "今すぐ更新",
     "action.prefetch": "HD パックを保存",
+    "action.generateAi": "透明猫を生成",
     "action.save": "設定を保存",
+    "action.select": "使う",
+    "action.delete": "削除",
+    "action.like": "好き",
+    "action.dislike": "好きではない",
     "status.label": "状態",
     "status.loading": "設定を読み込み中",
     "status.ready": "準備完了",
@@ -462,6 +654,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.refreshing": "壁紙を更新中",
     "status.prefetching": "HD 猫画像パックを保存中",
     "status.prefetched": "{count} 枚の HD 猫画像を保存しました",
+    "status.generatingAi": "透明猫カットアウトを生成中",
+    "status.generatedAi": "{count} 枚の透明猫を生成しました",
+    "status.galleryLoaded": "ギャラリーを読み込みました",
+    "status.deleted": "画像を削除しました",
+    "status.feedback": "フィードバックを保存し、次回選択を調整しました",
     "status.wallpaperSet": "壁紙を設定しました: {path}",
     "status.platformDetecting": "プラットフォームを検出中",
     "status.platform": "{platform}{beta} / 静的壁紙 {static}",
@@ -478,6 +675,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "panel.interactions": "インタラクション",
     "panel.schedule": "更新頻度",
     "panel.sources": "画像ソース",
+    "panel.ai": "AI 透明猫",
+    "panel.gallery": "猫ギャラリー",
+    "panel.analysis": "デスクトップ効果チェック",
     "panel.platform": "プラットフォーム",
     "field.language": "表示言語",
     "language.auto": "システム言語に合わせる",
@@ -496,7 +696,32 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.minResolution": "最低解像度",
     "field.preferredResolution": "オンライン取得の優先サイズ",
     "field.lowResFallback": "低解像度フォールバックを許可",
-    "hint.lowResFallback": "HD のみ使う場合はオフにします。",
+    "hint.lowResFallback": "固定で無効: 2560x1440 未満の画像は保存しません。",
+    "field.aiProvider": "AI プロバイダー",
+    "field.openaiKey": "OpenAI API キー",
+    "field.googleKey": "Google API キー",
+    "field.aiScene": "デスクトップペット場面",
+    "field.aiCount": "生成枚数",
+    "field.transparentCutout": "透明 PNG カットアウト",
+    "field.autoUseGenerated": "最新生成猫を自動使用",
+    "hint.transparentCutout": "背景なしの猫素材を作り、デスクトップに配置します。",
+    "hint.aiScene": "例: タスクバーから覗く、アイコン横に座る、デスクトップ端で伸びる。",
+    "gallery.path": "固定ギャラリー: {path}",
+    "gallery.empty": "管理ギャラリーに猫画像はまだありません。",
+    "gallery.quality": "{width}x{height} / {source} / score {score}",
+    "gallery.lowQuality": "2K 基準未満",
+    "gallery.rejected": "フィードバックで拒否済み",
+    "analysis.score": "効果スコア {score}/100",
+    "analysis.size": "出力 {width}x{height}、デスクトップ {virtualWidth}x{virtualHeight}",
+    "analysis.clean": "測定可能な問題はありません。",
+    "issue.NotVirtualDesktopSized": "出力画像が実際の仮想デスクトップを満たしていません。",
+    "issue.BelowMinimumResolution": "出力画像が 2K 品質基準未満です。",
+    "issue.PlaceholderGeneratedArt": "実写または AI 猫素材ではなくプレースホルダー画像です。",
+    "issue.NonTransparentPetAsset": "素材が透明なデスクトップペット切り抜きではありません。",
+    "issue.SubjectTouchesImageEdge": "透明猫が画像端に触れており、切れている可能性があります。",
+    "issue.PreferenceMatchUnverified": "品種やムードの一致は未検証です。",
+    "learning.summary": "好き {liked}、好きではない {disliked}、拒否 {rejected}",
+    "feedback.reason": "理由: 品種違い、小さい、切れている など",
     "schedule.daily": "毎日",
     "schedule.everyHours": "N 時間ごと",
     "schedule.onLogin": "ログイン時",
@@ -553,7 +778,12 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hero.lead": "언어, 고양이 이미지 소스, HD 품질, 다중 모니터 방식, 상호작용을 선택하세요. Rust 코어가 배경화면 갱신을 처리합니다.",
     "action.refresh": "지금 새로고침",
     "action.prefetch": "HD 팩 캐시",
+    "action.generateAi": "투명 고양이 생성",
     "action.save": "설정 저장",
+    "action.select": "사용",
+    "action.delete": "삭제",
+    "action.like": "좋아요",
+    "action.dislike": "싫어요",
     "status.label": "상태",
     "status.loading": "설정 불러오는 중",
     "status.ready": "준비됨",
@@ -563,6 +793,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.refreshing": "배경화면 새로고침 중",
     "status.prefetching": "HD 고양이 이미지 팩 캐시 중",
     "status.prefetched": "HD 고양이 이미지 {count}장 캐시됨",
+    "status.generatingAi": "투명 고양이 컷아웃 생성 중",
+    "status.generatedAi": "투명 고양이 {count}장 생성됨",
+    "status.galleryLoaded": "갤러리 로드됨",
+    "status.deleted": "이미지 삭제됨",
+    "status.feedback": "피드백 저장됨, 다음 선택에 반영됨",
     "status.wallpaperSet": "배경화면 설정됨: {path}",
     "status.platformDetecting": "플랫폼 감지 중",
     "status.platform": "{platform}{beta} / 정적 배경화면 {static}",
@@ -579,6 +814,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "panel.interactions": "상호작용",
     "panel.schedule": "새로고침 빈도",
     "panel.sources": "이미지 소스",
+    "panel.ai": "AI 투명 고양이",
+    "panel.gallery": "고양이 갤러리",
+    "panel.analysis": "데스크톱 효과 검사",
     "panel.platform": "플랫폼",
     "field.language": "표시 언어",
     "language.auto": "시스템 언어 따르기",
@@ -597,7 +835,32 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.minResolution": "최소 허용 해상도",
     "field.preferredResolution": "온라인 요청 우선 크기",
     "field.lowResFallback": "저해상도 대체 허용",
-    "hint.lowResFallback": "HD 전용 배경화면은 꺼두세요.",
+    "hint.lowResFallback": "항상 비활성: 2560x1440 미만 이미지는 저장하지 않습니다.",
+    "field.aiProvider": "AI 제공자",
+    "field.openaiKey": "OpenAI API 키",
+    "field.googleKey": "Google API 키",
+    "field.aiScene": "데스크톱 펫 장면",
+    "field.aiCount": "생성 수",
+    "field.transparentCutout": "투명 PNG 컷아웃",
+    "field.autoUseGenerated": "최신 생성 고양이 자동 사용",
+    "hint.transparentCutout": "배경 없는 고양이 소재를 만들어 데스크톱에 배치합니다.",
+    "hint.aiScene": "예: 작업 표시줄에서 고개 내밀기, 아이콘 옆에 앉기, 화면 가장자리에서 스트레칭.",
+    "gallery.path": "고정 갤러리: {path}",
+    "gallery.empty": "관리 갤러리에 아직 고양이 이미지가 없습니다.",
+    "gallery.quality": "{width}x{height} / {source} / 점수 {score}",
+    "gallery.lowQuality": "2K 기준 미만",
+    "gallery.rejected": "피드백으로 거부됨",
+    "analysis.score": "효과 점수 {score}/100",
+    "analysis.size": "결과 {width}x{height}, 데스크톱 {virtualWidth}x{virtualHeight}",
+    "analysis.clean": "측정 가능한 문제가 없습니다.",
+    "issue.NotVirtualDesktopSized": "결과 이미지가 실제 가상 데스크톱을 채우지 않습니다.",
+    "issue.BelowMinimumResolution": "결과 이미지가 2K 품질 기준 미만입니다.",
+    "issue.PlaceholderGeneratedArt": "실제 또는 AI 고양이 소재가 아닌 임시 생성 그림입니다.",
+    "issue.NonTransparentPetAsset": "소재가 투명 데스크톱 펫 컷아웃이 아닙니다.",
+    "issue.SubjectTouchesImageEdge": "투명 고양이가 이미지 가장자리에 닿아 잘렸을 수 있습니다.",
+    "issue.PreferenceMatchUnverified": "품종 또는 분위기 일치가 아직 검증되지 않았습니다.",
+    "learning.summary": "좋아요 {liked}, 싫어요 {disliked}, 거부 {rejected}",
+    "feedback.reason": "이유: 품종 불일치, 너무 작음, 잘림 등",
     "schedule.daily": "매일",
     "schedule.everyHours": "N시간마다",
     "schedule.onLogin": "로그인 시",
@@ -657,6 +920,16 @@ function App() {
   const [slots, setSlots] = useState<Rect[]>([]);
   const [status, setStatus] = useState("status.loading");
   const [localDirInput, setLocalDirInput] = useState("");
+  const [galleryPath, setGalleryPath] = useState("");
+  const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
+  const [latestAnalysis, setLatestAnalysis] = useState<WallpaperAnalysis | null>(null);
+  const [learning, setLearning] = useState<LearningSummary>({
+    liked: 0,
+    disliked: 0,
+    rejected_images: 0,
+    top_reasons: [],
+  });
+  const [feedbackReason, setFeedbackReason] = useState("");
   const locale = resolveLocale(config.language);
   const t = useMemo(() => translator(locale), [locale]);
   const scheduleKind = getScheduleKind(config.schedule);
@@ -674,13 +947,33 @@ function App() {
       safeInvoke<AppConfig>("get_config", undefined, defaultConfig),
       safeInvoke<Capabilities | null>("platform_capabilities", undefined, null),
       safeInvoke<DisplayGeometry[]>("display_summary", undefined, fallbackDisplays()),
+      safeInvoke<string>("gallery_location", undefined, ""),
+      safeInvoke<GalleryImage[]>("list_gallery_images", undefined, []),
+      safeInvoke<LearningSummary>("learning_summary", undefined, {
+        liked: 0,
+        disliked: 0,
+        rejected_images: 0,
+        top_reasons: [],
+      }),
     ])
-      .then(([loadedConfig, loadedCapabilities, loadedDisplays]) => {
+      .then(
+        ([
+          loadedConfig,
+          loadedCapabilities,
+          loadedDisplays,
+          loadedGalleryPath,
+          loadedGalleryImages,
+          loadedLearning,
+        ]) => {
         setConfig(mergeConfig(loadedConfig));
         setCapabilities(loadedCapabilities);
         setDisplays(loadedDisplays.length ? loadedDisplays : fallbackDisplays());
+        setGalleryPath(loadedGalleryPath);
+        setGalleryImages(loadedGalleryImages);
+        setLearning(loadedLearning);
         setStatus(hasTauriRuntime() ? "status.ready" : "status.preview");
-      })
+      },
+      )
       .catch((error) => setStatus(String(error)));
   }, []);
 
@@ -720,10 +1013,16 @@ function App() {
   async function refreshNow() {
     setStatus("status.refreshing");
     try {
-      const path = await safeInvoke<string>("refresh_wallpaper", undefined, "");
+      const result = await safeInvoke<WallpaperResult | null>("refresh_wallpaper", undefined, null);
+      if (!result) {
+        setStatus("status.preview");
+        return;
+      }
+      setLatestAnalysis(result.analysis);
       setStatus(
-        path ? format(t("status.wallpaperSet"), { path }) : "status.preview",
+        result.path ? format(t("status.wallpaperSet"), { path: result.path }) : "status.preview",
       );
+      await loadGallery();
     } catch (error) {
       setStatus(String(error));
     }
@@ -734,6 +1033,89 @@ function App() {
     try {
       const paths = await safeInvoke<string[]>("prefetch_wallpapers", { count: 12 }, []);
       setStatus(format(t("status.prefetched"), { count: paths.length }));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  }
+
+  async function loadGallery() {
+    const [path, images, summary] = await Promise.all([
+      safeInvoke<string>("gallery_location", undefined, ""),
+      safeInvoke<GalleryImage[]>("list_gallery_images", undefined, []),
+      safeInvoke<LearningSummary>("learning_summary", undefined, learning),
+    ]);
+    setGalleryPath(path);
+    setGalleryImages(images);
+    setLearning(summary);
+  }
+
+  async function generateAiCats() {
+    setStatus("status.generatingAi");
+    try {
+      const images = await safeInvoke<GalleryImage[]>(
+        "generate_ai_cat_images",
+        { count: config.ai_generation.count },
+        [],
+      );
+      setGalleryImages(images);
+      setStatus(format(t("status.generatedAi"), { count: images.length }));
+      await loadGallery();
+    } catch (error) {
+      setStatus(String(error));
+    }
+  }
+
+  async function selectGalleryImage(path: string) {
+    setStatus("status.refreshing");
+    try {
+      const result = await safeInvoke<WallpaperResult | null>(
+        "select_gallery_image",
+        { path },
+        null,
+      );
+      if (result) {
+        setLatestAnalysis(result.analysis);
+        setStatus(format(t("status.wallpaperSet"), { path: result.path }));
+        setConfig({
+          ...config,
+          sources: { ...config.sources, selected_gallery_image: path },
+        });
+      }
+      await loadGallery();
+    } catch (error) {
+      setStatus(String(error));
+    }
+  }
+
+  async function deleteGalleryImage(path: string) {
+    try {
+      await safeInvoke("delete_gallery_image", { path });
+      setStatus("status.deleted");
+      await loadGallery();
+    } catch (error) {
+      setStatus(String(error));
+    }
+  }
+
+  async function sendFeedback(liked: boolean) {
+    const path = latestAnalysis?.wallpaper_path ?? config.sources.selected_gallery_image;
+    if (!path) return;
+    try {
+      const summary = await safeInvoke<LearningSummary>(
+        "record_wallpaper_feedback",
+        {
+          input: {
+            path,
+            liked,
+            reason: feedbackReason || null,
+          },
+        },
+        learning,
+      );
+      setLearning(summary);
+      setFeedbackReason("");
+      setStatus("status.feedback");
+      await loadGallery();
     } catch (error) {
       setStatus(String(error));
     }
@@ -948,13 +1330,14 @@ function App() {
               </span>
               <input
                 type="checkbox"
-                checked={config.image_quality.allow_low_resolution_fallback}
-                onChange={(event) =>
+                checked={false}
+                disabled
+                onChange={() =>
                   setConfig({
                     ...config,
                     image_quality: {
                       ...config.image_quality,
-                      allow_low_resolution_fallback: event.currentTarget.checked,
+                      allow_low_resolution_fallback: false,
                     },
                   })
                 }
@@ -1218,6 +1601,207 @@ function App() {
             </div>
           </Panel>
 
+          <Panel title={t("panel.ai")}>
+            <label className="field">
+              {t("field.aiProvider")}
+              <select
+                value={config.ai_generation.provider}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    ai_generation: {
+                      ...config.ai_generation,
+                      provider: event.currentTarget.value as AiImageProvider,
+                    },
+                  })
+                }
+              >
+                <option value="OpenAi">OpenAI GPT Image 1.5</option>
+                <option value="GoogleNanoBananaPro">Google Nano Banana Pro</option>
+              </select>
+            </label>
+            <label className="field">
+              {t("field.openaiKey")}
+              <input
+                placeholder="sk-..."
+                type="password"
+                value={config.ai_generation.openai_api_key ?? ""}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    ai_generation: {
+                      ...config.ai_generation,
+                      openai_api_key: event.currentTarget.value || null,
+                    },
+                  })
+                }
+              />
+            </label>
+            <label className="field">
+              {t("field.googleKey")}
+              <input
+                placeholder="AIza..."
+                type="password"
+                value={config.ai_generation.google_api_key ?? ""}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    ai_generation: {
+                      ...config.ai_generation,
+                      google_api_key: event.currentTarget.value || null,
+                    },
+                  })
+                }
+              />
+            </label>
+            <label className="field">
+              {t("field.aiScene")}
+              <input
+                type="text"
+                value={config.ai_generation.scene}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    ai_generation: {
+                      ...config.ai_generation,
+                      scene: event.currentTarget.value,
+                    },
+                  })
+                }
+              />
+              <small>{t("hint.aiScene")}</small>
+            </label>
+            <label className="field">
+              {t("field.aiCount")}
+              <input
+                max="24"
+                min="1"
+                type="number"
+                value={config.ai_generation.count}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    ai_generation: {
+                      ...config.ai_generation,
+                      count: Number(event.currentTarget.value),
+                    },
+                  })
+                }
+              />
+            </label>
+            <label className="switch">
+              <span>
+                <strong>{t("field.transparentCutout")}</strong>
+                <small>{t("hint.transparentCutout")}</small>
+              </span>
+              <input checked disabled type="checkbox" />
+            </label>
+            <label className="switch">
+              <span>
+                <strong>{t("field.autoUseGenerated")}</strong>
+                <small>{t("hint.optional")}</small>
+              </span>
+              <input
+                checked={config.ai_generation.auto_use_generated}
+                type="checkbox"
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    ai_generation: {
+                      ...config.ai_generation,
+                      auto_use_generated: event.currentTarget.checked,
+                    },
+                  })
+                }
+              />
+            </label>
+            <button className="primary panel-action" type="button" onClick={generateAiCats}>
+              {t("action.generateAi")}
+            </button>
+          </Panel>
+
+          <Panel title={t("panel.gallery")}>
+            <p className="panel-note">
+              {format(t("gallery.path"), { path: galleryPath || "-" })}
+            </p>
+            <div className="gallery-grid">
+              {galleryImages.length === 0 && <p className="panel-note">{t("gallery.empty")}</p>}
+              {galleryImages.slice(0, 12).map((image) => (
+                <article className={image.rejected ? "gallery-item rejected" : "gallery-item"} key={image.path}>
+                  <img alt={image.file_name} src={imageSrc(image.path)} />
+                  <strong>{image.file_name}</strong>
+                  <small>
+                    {format(t("gallery.quality"), {
+                      width: image.width,
+                      height: image.height,
+                      source: image.source,
+                      score: image.feedback_score,
+                    })}
+                  </small>
+                  <div className="badges">
+                    {!image.meets_quality && <span>{t("gallery.lowQuality")}</span>}
+                    {image.rejected && <span>{t("gallery.rejected")}</span>}
+                  </div>
+                  <div className="mini-actions">
+                    <button type="button" onClick={() => selectGalleryImage(image.path)}>
+                      {t("action.select")}
+                    </button>
+                    <button type="button" onClick={() => deleteGalleryImage(image.path)}>
+                      {t("action.delete")}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel title={t("panel.analysis")}>
+            {latestAnalysis ? (
+              <div className="analysis-box">
+                <strong>{format(t("analysis.score"), { score: latestAnalysis.score })}</strong>
+                <small>
+                  {format(t("analysis.size"), {
+                    width: latestAnalysis.width,
+                    height: latestAnalysis.height,
+                    virtualWidth: latestAnalysis.virtual_width,
+                    virtualHeight: latestAnalysis.virtual_height,
+                  })}
+                </small>
+                {latestAnalysis.issues.length ? (
+                  <ul>
+                    {latestAnalysis.issues.map((issue) => (
+                      <li key={issue}>{t(`issue.${issue}`)}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>{t("analysis.clean")}</p>
+                )}
+              </div>
+            ) : (
+              <p className="panel-note">{t("analysis.clean")}</p>
+            )}
+            <p className="panel-note">
+              {format(t("learning.summary"), {
+                liked: learning.liked,
+                disliked: learning.disliked,
+                rejected: learning.rejected_images,
+              })}
+            </p>
+            <div className="inline-field">
+              <input
+                placeholder={t("feedback.reason")}
+                value={feedbackReason}
+                onChange={(event) => setFeedbackReason(event.currentTarget.value)}
+              />
+              <button type="button" onClick={() => sendFeedback(false)}>
+                {t("action.dislike")}
+              </button>
+            </div>
+            <button className="secondary panel-action" type="button" onClick={() => sendFeedback(true)}>
+              {t("action.like")}
+            </button>
+          </Panel>
+
           <Panel title={t("panel.platform")}>
             <label className="field">
               {t("field.mode")}
@@ -1447,7 +2031,18 @@ function mergeConfig(config: AppConfig): AppConfig {
       ...defaultConfig.sources,
       ...(config.sources ?? {}),
     },
+    ai_generation: {
+      ...defaultConfig.ai_generation,
+      ...(config.ai_generation ?? {}),
+      transparent_cutout: true,
+    },
   };
+}
+
+function imageSrc(path: string): string {
+  if (!path) return "";
+  if (!hasTauriRuntime()) return "";
+  return convertFileSrc(path);
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

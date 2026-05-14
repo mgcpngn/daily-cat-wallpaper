@@ -15,6 +15,8 @@ pub struct AppConfig {
     pub interactions: InteractionConfig,
     pub schedule: ScheduleConfig,
     pub sources: SourceConfig,
+    #[serde(default)]
+    pub ai_generation: AiGenerationConfig,
     pub platform_mode: PlatformMode,
     pub launch_at_login: bool,
 }
@@ -23,7 +25,7 @@ pub struct AppConfig {
 pub enum ConfigError {
     #[error("cat_count must be between 1 and 5")]
     InvalidCatCount,
-    #[error("image quality minimum must be at least 1920x1080 and preferred size cannot be smaller than minimum")]
+    #[error("image quality minimum must be at least 2560x1440, preferred size cannot be smaller than minimum, and low-resolution fallback must stay disabled")]
     InvalidImageQuality,
     #[error("at least one cat breed must be selected")]
     MissingBreeds,
@@ -33,6 +35,8 @@ pub enum ConfigError {
     MissingSources,
     #[error("refresh interval must be between 1 and 24 hours")]
     InvalidRefreshInterval,
+    #[error("AI generation count must be between 1 and 24")]
+    InvalidAiGenerationCount,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -115,6 +119,28 @@ pub struct SourceConfig {
     pub pexels_api_key: Option<String>,
     #[serde(default)]
     pub unsplash_access_key: Option<String>,
+    #[serde(default)]
+    pub selected_gallery_image: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AiImageProvider {
+    #[default]
+    OpenAi,
+    GoogleNanoBananaPro,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AiGenerationConfig {
+    pub provider: AiImageProvider,
+    pub openai_api_key: Option<String>,
+    pub google_api_key: Option<String>,
+    pub openai_model: String,
+    pub google_model: String,
+    pub scene: String,
+    pub count: u8,
+    pub transparent_cutout: bool,
+    pub auto_use_generated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -136,6 +162,7 @@ impl Default for AppConfig {
             interactions: InteractionConfig::default(),
             schedule: ScheduleConfig::default(),
             sources: SourceConfig::default(),
+            ai_generation: AiGenerationConfig::default(),
             platform_mode: PlatformMode::Automatic,
             launch_at_login: true,
         }
@@ -164,6 +191,9 @@ impl AppConfig {
                 return Err(ConfigError::InvalidRefreshInterval);
             }
         }
+        if !(1..=24).contains(&self.ai_generation.count) {
+            return Err(ConfigError::InvalidAiGenerationCount);
+        }
         Ok(())
     }
 }
@@ -182,10 +212,11 @@ impl Default for ImageQuality {
 
 impl ImageQuality {
     pub fn is_valid(&self) -> bool {
-        self.min_width >= 1920
-            && self.min_height >= 1080
+        self.min_width >= 2560
+            && self.min_height >= 1440
             && self.preferred_width >= self.min_width
             && self.preferred_height >= self.min_height
+            && !self.allow_low_resolution_fallback
     }
 }
 
@@ -220,6 +251,23 @@ impl Default for SourceConfig {
             magnific_api_key: None,
             pexels_api_key: None,
             unsplash_access_key: None,
+            selected_gallery_image: None,
+        }
+    }
+}
+
+impl Default for AiGenerationConfig {
+    fn default() -> Self {
+        Self {
+            provider: AiImageProvider::OpenAi,
+            openai_api_key: None,
+            google_api_key: None,
+            openai_model: "gpt-image-1.5".to_string(),
+            google_model: "gemini-3-pro-image-preview".to_string(),
+            scene: "sitting naturally on the desktop edge".to_string(),
+            count: 4,
+            transparent_cutout: true,
+            auto_use_generated: true,
         }
     }
 }

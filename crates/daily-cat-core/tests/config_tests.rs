@@ -1,4 +1,6 @@
-use daily_cat_core::sources::{pixabay_search_query, the_cat_api_breed_ids, wikimedia_search_query};
+use daily_cat_core::sources::{
+    pixabay_search_query, the_cat_api_breed_ids, transparent_cat_prompt, wikimedia_search_query,
+};
 use daily_cat_core::{
     AppConfig, Canvas, CatCountStrategy, ConfigError, ImageQuality, LanguagePreference,
     LayoutEngine, SafeArea, SourcePlanner,
@@ -74,6 +76,35 @@ fn image_quality_rejects_sub_hd_thresholds() {
 }
 
 #[test]
+fn image_quality_rejects_1080p_because_wallpapers_must_be_2k_or_better() {
+    let config = AppConfig {
+        image_quality: ImageQuality {
+            min_width: 1920,
+            min_height: 1080,
+            preferred_width: 2560,
+            preferred_height: 1440,
+            allow_low_resolution_fallback: false,
+        },
+        ..AppConfig::default()
+    };
+
+    assert_eq!(config.validate(), Err(ConfigError::InvalidImageQuality));
+}
+
+#[test]
+fn image_quality_rejects_low_resolution_fallback() {
+    let config = AppConfig {
+        image_quality: ImageQuality {
+            allow_low_resolution_fallback: true,
+            ..ImageQuality::default()
+        },
+        ..AppConfig::default()
+    };
+
+    assert_eq!(config.validate(), Err(ConfigError::InvalidImageQuality));
+}
+
+#[test]
 fn source_planner_prefers_local_then_cataas_then_the_cat_api() {
     let planner = SourcePlanner {
         local_dirs: vec!["C:/cats".into()],
@@ -85,7 +116,13 @@ fn source_planner_prefers_local_then_cataas_then_the_cat_api() {
 
     assert_eq!(
         planner.ordered_sources().unwrap(),
-        vec!["local:C:/cats", "wikimedia", "thecatapi", "cataas", "generated"]
+        vec![
+            "local:C:/cats",
+            "wikimedia",
+            "thecatapi",
+            "cataas",
+            "generated"
+        ]
     );
 }
 
@@ -135,7 +172,14 @@ fn advanced_api_keys_enable_premium_sources_before_public_sources() {
 
     assert_eq!(
         planner.ordered_sources().unwrap(),
-        vec!["magnific", "pixabay", "wikimedia", "thecatapi", "cataas", "generated"]
+        vec![
+            "magnific",
+            "pixabay",
+            "wikimedia",
+            "thecatapi",
+            "cataas",
+            "generated"
+        ]
     );
 }
 
@@ -144,6 +188,22 @@ fn pixabay_query_is_wallpaper_oriented() {
     let query = pixabay_search_query(&["calico".to_string()], &[]);
 
     assert_eq!(query, "calico cat wallpaper");
+}
+
+#[test]
+fn ai_prompt_requests_lifelike_transparent_desktop_pet_cutout() {
+    let config = AppConfig {
+        breeds: vec!["ragdoll".to_string()],
+        image_types: vec![daily_cat_core::config::CatImageType::Healing],
+        ..AppConfig::default()
+    };
+
+    let prompt = transparent_cat_prompt(&config);
+
+    assert!(prompt.contains("transparent PNG cutout"));
+    assert!(prompt.contains("computer desktop"));
+    assert!(prompt.contains("complete body visible"));
+    assert!(prompt.contains("No room"));
 }
 
 #[test]
