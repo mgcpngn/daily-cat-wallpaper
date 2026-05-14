@@ -43,8 +43,11 @@ type AppConfig = {
   schedule: ScheduleConfig;
   sources: {
     local_dirs: string[];
+    wikimedia_commons: boolean;
     cataas: boolean;
     the_cat_api: boolean;
+    pixabay_api_key: string | null;
+    magnific_api_key: string | null;
     pexels_api_key: string | null;
     unsplash_access_key: string | null;
   };
@@ -125,8 +128,11 @@ const defaultConfig: AppConfig = {
   schedule: { Daily: { time: "09:00" } },
   sources: {
     local_dirs: [],
+    wikimedia_commons: true,
     cataas: true,
     the_cat_api: true,
+    pixabay_api_key: null,
+    magnific_api_key: null,
     pexels_api_key: null,
     unsplash_access_key: null,
   },
@@ -141,6 +147,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hero.lead":
       "Choose language, cat sources, HD quality, monitor behavior, and interaction style. The Rust core takes over wallpaper refreshes.",
     "action.refresh": "Refresh now",
+    "action.prefetch": "Cache HD pack",
     "action.save": "Save preferences",
     "status.label": "Status",
     "status.loading": "Loading configuration",
@@ -149,6 +156,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.saving": "Saving preferences",
     "status.saved": "Preferences saved",
     "status.refreshing": "Refreshing wallpaper",
+    "status.prefetching": "Caching HD cat pack",
+    "status.prefetched": "Cached {count} HD cat images",
     "status.wallpaperSet": "Wallpaper set: {path}",
     "status.platformDetecting": "Detecting platform",
     "status.platform": "{platform}{beta} / static {static}",
@@ -193,6 +202,14 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.everyHours": "Every N hours",
     "source.cataas": "Random no-key cats requested at preferred size",
     "source.theCatApi": "Full-size cat candidates and breed metadata",
+    "source.wikimedia": "Stable HD images matched by breed and color keywords",
+    "source.pixabay": "Optional API key source for public HD cat photos",
+    "source.magnific": "Optional API key source for Magnific HD resources",
+    "source.pexels": "Optional API key source for curated HD cat photos",
+    "field.pixabayKey": "Pixabay API key",
+    "field.magnificKey": "Magnific API key",
+    "field.pexelsKey": "Pexels API key",
+    "source.getPexelsKey": "Get Pexels API key",
     "source.localPlaceholder": "C:\\Users\\you\\Pictures\\Cats",
     "source.add": "Add",
     "field.mode": "Mode",
@@ -232,6 +249,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hero.title": "让猫咪接管你的桌面。",
     "hero.lead": "选择语言、猫图来源、高清质量、多屏策略和互动方式。Rust 核心负责自动刷新和壁纸接管。",
     "action.refresh": "立即换猫",
+    "action.prefetch": "缓存高清猫图包",
     "action.save": "保存配置",
     "status.label": "状态",
     "status.loading": "正在加载配置",
@@ -240,6 +258,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.saving": "正在保存偏好",
     "status.saved": "偏好已保存",
     "status.refreshing": "正在刷新壁纸",
+    "status.prefetching": "正在缓存高清猫图包",
+    "status.prefetched": "已缓存 {count} 张高清猫图",
     "status.wallpaperSet": "壁纸已设置：{path}",
     "status.platformDetecting": "正在检测平台",
     "status.platform": "{platform}{beta} / 静态壁纸 {static}",
@@ -283,6 +303,14 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.everyHours": "间隔小时",
     "source.cataas": "免 Key 随机猫图，按优先尺寸请求",
     "source.theCatApi": "全尺寸候选猫图和品种元数据",
+    "source.wikimedia": "按品种和花色关键词匹配的稳定高清图片",
+    "source.pixabay": "可选 API Key 来源，获取公开高清猫图",
+    "source.magnific": "可选 API Key 来源，获取 Magnific 高清资源",
+    "source.pexels": "可选 API Key 来源，获取精选高清猫图",
+    "field.pixabayKey": "Pixabay API Key",
+    "field.magnificKey": "Magnific API Key",
+    "field.pexelsKey": "Pexels API Key",
+    "source.getPexelsKey": "获取 Pexels API Key",
     "source.localPlaceholder": "C:\\Users\\you\\Pictures\\Cats",
     "source.add": "添加",
     "field.mode": "模式",
@@ -322,6 +350,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hero.title": "讓貓咪接管你的桌面。",
     "hero.lead": "選擇語言、貓圖來源、高清品質、多螢幕策略和互動方式。Rust 核心負責自動刷新和桌布接管。",
     "action.refresh": "立即換貓",
+    "action.prefetch": "快取高清貓圖包",
     "action.save": "儲存設定",
     "status.label": "狀態",
     "status.loading": "正在載入設定",
@@ -330,6 +359,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.saving": "正在儲存偏好",
     "status.saved": "偏好已儲存",
     "status.refreshing": "正在刷新桌布",
+    "status.prefetching": "正在快取高清貓圖包",
+    "status.prefetched": "已快取 {count} 張高清貓圖",
     "status.wallpaperSet": "桌布已設定：{path}",
     "status.platformDetecting": "正在偵測平台",
     "status.platform": "{platform}{beta} / 靜態桌布 {static}",
@@ -373,6 +404,14 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.everyHours": "間隔小時",
     "source.cataas": "免 Key 隨機貓圖，依優先尺寸請求",
     "source.theCatApi": "全尺寸候選貓圖和品種 metadata",
+    "source.wikimedia": "依品種和花色關鍵字匹配的穩定高清圖片",
+    "source.pixabay": "可選 API Key 來源，取得公開高清貓圖",
+    "source.magnific": "可選 API Key 來源，取得 Magnific 高清資源",
+    "source.pexels": "可選 API Key 來源，取得精選高清貓圖",
+    "field.pixabayKey": "Pixabay API Key",
+    "field.magnificKey": "Magnific API Key",
+    "field.pexelsKey": "Pexels API Key",
+    "source.getPexelsKey": "取得 Pexels API Key",
     "source.localPlaceholder": "C:\\Users\\you\\Pictures\\Cats",
     "source.add": "新增",
     "field.mode": "模式",
@@ -412,6 +451,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hero.title": "猫がデスクトップを支配します。",
     "hero.lead": "言語、猫画像ソース、HD 品質、マルチモニター動作、インタラクションを選べます。Rust コアが壁紙更新を担当します。",
     "action.refresh": "今すぐ更新",
+    "action.prefetch": "HD パックを保存",
     "action.save": "設定を保存",
     "status.label": "状態",
     "status.loading": "設定を読み込み中",
@@ -420,6 +460,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.saving": "設定を保存中",
     "status.saved": "設定を保存しました",
     "status.refreshing": "壁紙を更新中",
+    "status.prefetching": "HD 猫画像パックを保存中",
+    "status.prefetched": "{count} 枚の HD 猫画像を保存しました",
     "status.wallpaperSet": "壁紙を設定しました: {path}",
     "status.platformDetecting": "プラットフォームを検出中",
     "status.platform": "{platform}{beta} / 静的壁紙 {static}",
@@ -463,6 +505,14 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.everyHours": "間隔時間",
     "source.cataas": "キー不要のランダム猫画像を優先サイズで取得",
     "source.theCatApi": "フルサイズ候補と品種メタデータ",
+    "source.wikimedia": "品種と毛色キーワードで一致する安定した HD 画像",
+    "source.pixabay": "公開 HD 猫写真用の任意 API キーソース",
+    "source.magnific": "Magnific HD リソース用の任意 API キーソース",
+    "source.pexels": "厳選 HD 猫写真用の任意 API キーソース",
+    "field.pixabayKey": "Pixabay API Key",
+    "field.magnificKey": "Magnific API Key",
+    "field.pexelsKey": "Pexels API Key",
+    "source.getPexelsKey": "Pexels API Key を取得",
     "source.localPlaceholder": "C:\\Users\\you\\Pictures\\Cats",
     "source.add": "追加",
     "field.mode": "モード",
@@ -502,6 +552,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hero.title": "고양이가 데스크톱을 접수합니다.",
     "hero.lead": "언어, 고양이 이미지 소스, HD 품질, 다중 모니터 방식, 상호작용을 선택하세요. Rust 코어가 배경화면 갱신을 처리합니다.",
     "action.refresh": "지금 새로고침",
+    "action.prefetch": "HD 팩 캐시",
     "action.save": "설정 저장",
     "status.label": "상태",
     "status.loading": "설정 불러오는 중",
@@ -510,6 +561,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.saving": "설정 저장 중",
     "status.saved": "설정 저장됨",
     "status.refreshing": "배경화면 새로고침 중",
+    "status.prefetching": "HD 고양이 이미지 팩 캐시 중",
+    "status.prefetched": "HD 고양이 이미지 {count}장 캐시됨",
     "status.wallpaperSet": "배경화면 설정됨: {path}",
     "status.platformDetecting": "플랫폼 감지 중",
     "status.platform": "{platform}{beta} / 정적 배경화면 {static}",
@@ -553,6 +606,14 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.everyHours": "간격 시간",
     "source.cataas": "키 없이 무작위 고양이 이미지를 우선 크기로 요청",
     "source.theCatApi": "전체 크기 후보와 품종 메타데이터",
+    "source.wikimedia": "품종과 털색 키워드에 맞춘 안정적인 HD 이미지",
+    "source.pixabay": "공개 HD 고양이 사진용 선택 API 키 소스",
+    "source.magnific": "Magnific HD 리소스용 선택 API 키 소스",
+    "source.pexels": "큐레이션된 HD 고양이 사진용 선택 API 키 소스",
+    "field.pixabayKey": "Pixabay API Key",
+    "field.magnificKey": "Magnific API Key",
+    "field.pexelsKey": "Pexels API Key",
+    "source.getPexelsKey": "Pexels API Key 받기",
     "source.localPlaceholder": "C:\\Users\\you\\Pictures\\Cats",
     "source.add": "추가",
     "field.mode": "모드",
@@ -668,6 +729,16 @@ function App() {
     }
   }
 
+  async function prefetchNow() {
+    setStatus("status.prefetching");
+    try {
+      const paths = await safeInvoke<string[]>("prefetch_wallpapers", { count: 12 }, []);
+      setStatus(format(t("status.prefetched"), { count: paths.length }));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  }
+
   return (
     <main className="app-shell">
       <section className="hero">
@@ -678,6 +749,9 @@ function App() {
           <div className="action-row">
             <button className="primary" onClick={refreshNow}>
               {t("action.refresh")}
+            </button>
+            <button className="secondary" onClick={prefetchNow}>
+              {t("action.prefetch")}
             </button>
             <button className="secondary" onClick={save}>
               {t("action.save")}
@@ -984,6 +1058,25 @@ function App() {
           <Panel title={t("panel.sources")}>
             <label className="switch">
               <span>
+                <strong>Wikimedia Commons</strong>
+                <small>{t("source.wikimedia")}</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={config.sources.wikimedia_commons}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    sources: {
+                      ...config.sources,
+                      wikimedia_commons: event.currentTarget.checked,
+                    },
+                  })
+                }
+              />
+            </label>
+            <label className="switch">
+              <span>
                 <strong>CATAAS</strong>
                 <small>{t("source.cataas")}</small>
               </span>
@@ -1016,6 +1109,70 @@ function App() {
                   })
                 }
               />
+            </label>
+            <label className="field">
+              {t("field.pexelsKey")}
+              <div className="inline-field">
+                <input
+                  placeholder="Pexels API Key"
+                  type="password"
+                  value={config.sources.pexels_api_key ?? ""}
+                  onChange={(event) =>
+                    setConfig({
+                      ...config,
+                      sources: {
+                        ...config.sources,
+                        pexels_api_key: event.currentTarget.value || null,
+                      },
+                    })
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.open("https://www.pexels.com/zh-cn/api/key/", "_blank", "noopener")
+                  }
+                >
+                  {t("source.getPexelsKey")}
+                </button>
+              </div>
+              <small>{t("source.pexels")}</small>
+            </label>
+            <label className="field">
+              {t("field.pixabayKey")}
+              <input
+                placeholder="Pixabay API Key"
+                type="password"
+                value={config.sources.pixabay_api_key ?? ""}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    sources: {
+                      ...config.sources,
+                      pixabay_api_key: event.currentTarget.value || null,
+                    },
+                  })
+                }
+              />
+              <small>{t("source.pixabay")}</small>
+            </label>
+            <label className="field">
+              {t("field.magnificKey")}
+              <input
+                placeholder="Magnific API Key"
+                type="password"
+                value={config.sources.magnific_api_key ?? ""}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    sources: {
+                      ...config.sources,
+                      magnific_api_key: event.currentTarget.value || null,
+                    },
+                  })
+                }
+              />
+              <small>{t("source.magnific")}</small>
             </label>
             <div className="inline-field">
               <input

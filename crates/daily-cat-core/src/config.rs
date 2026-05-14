@@ -103,9 +103,17 @@ pub enum ScheduleConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceConfig {
     pub local_dirs: Vec<String>,
+    #[serde(default = "default_true")]
+    pub wikimedia_commons: bool,
     pub cataas: bool,
     pub the_cat_api: bool,
+    #[serde(default)]
+    pub pixabay_api_key: Option<String>,
+    #[serde(default)]
+    pub magnific_api_key: Option<String>,
+    #[serde(default)]
     pub pexels_api_key: Option<String>,
+    #[serde(default)]
     pub unsplash_access_key: Option<String>,
 }
 
@@ -205,8 +213,11 @@ impl Default for SourceConfig {
     fn default() -> Self {
         Self {
             local_dirs: Vec::new(),
+            wikimedia_commons: true,
             cataas: true,
             the_cat_api: true,
+            pixabay_api_key: None,
+            magnific_api_key: None,
             pexels_api_key: None,
             unsplash_access_key: None,
         }
@@ -215,16 +226,12 @@ impl Default for SourceConfig {
 
 impl SourceConfig {
     pub fn has_any_source(&self) -> bool {
-        !self.local_dirs.is_empty()
-            || self.cataas
-            || self.the_cat_api
-            || self
-                .pexels_api_key
-                .as_deref()
-                .is_some_and(|key| !key.trim().is_empty())
-            || self
-                .unsplash_access_key
-                .as_deref()
-                .is_some_and(|key| !key.trim().is_empty())
+        // The generated fallback is always available, so users can disable every
+        // network source without making refresh impossible.
+        true
     }
+}
+
+fn default_true() -> bool {
+    true
 }

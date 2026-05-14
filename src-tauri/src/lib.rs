@@ -47,16 +47,7 @@ fn display_summary(app: AppHandle) -> Vec<DisplayGeometry> {
 #[tauri::command]
 async fn refresh_wallpaper(app: AppHandle, state: State<'_, AppState>) -> Result<PathBuf, String> {
     let config = state.load_config().map_err(|error| error.to_string())?;
-    let source_planner = SourcePlanner {
-        local_dirs: config
-            .sources
-            .local_dirs
-            .iter()
-            .map(PathBuf::from)
-            .collect(),
-        cataas_enabled: config.sources.cataas,
-        the_cat_api_enabled: config.sources.the_cat_api,
-    };
+    let source_planner = source_planner_from_config(&config);
     let displays = display_geometries_or_default(&app, &config);
     let assignments = LayoutEngine.cat_assignments(displays.len(), &config);
     let unique_cat_count = assignments.iter().max().map(|index| index + 1).unwrap_or(1);
@@ -80,6 +71,38 @@ async fn refresh_wallpaper(app: AppHandle, state: State<'_, AppState>) -> Result
         .map_err(|error| error.to_string())?;
 
     Ok(image_path)
+}
+
+#[tauri::command]
+async fn prefetch_wallpapers(
+    state: State<'_, AppState>,
+    count: usize,
+) -> Result<Vec<PathBuf>, String> {
+    let config = state.load_config().map_err(|error| error.to_string())?;
+    let source_planner = source_planner_from_config(&config);
+    state
+        .resolve_wallpaper_images(&source_planner, &config.image_quality, count.clamp(1, 24))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+fn source_planner_from_config(config: &AppConfig) -> SourcePlanner {
+    SourcePlanner {
+        local_dirs: config
+            .sources
+            .local_dirs
+            .iter()
+            .map(PathBuf::from)
+            .collect(),
+        wikimedia_commons_enabled: config.sources.wikimedia_commons,
+        cataas_enabled: config.sources.cataas,
+        the_cat_api_enabled: config.sources.the_cat_api,
+        breeds: config.breeds.clone(),
+        image_types: config.image_types.clone(),
+        pixabay_api_key: config.sources.pixabay_api_key.clone(),
+        magnific_api_key: config.sources.magnific_api_key.clone(),
+        pexels_api_key: config.sources.pexels_api_key.clone(),
+    }
 }
 
 fn display_geometries_or_default(app: &AppHandle, config: &AppConfig) -> Vec<DisplayGeometry> {
@@ -122,7 +145,8 @@ pub fn run() {
             preview_layout,
             platform_capabilities,
             display_summary,
-            refresh_wallpaper
+            refresh_wallpaper,
+            prefetch_wallpapers
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Daily Cat Wallpaper");

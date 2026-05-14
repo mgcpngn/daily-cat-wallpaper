@@ -1,6 +1,7 @@
+use daily_cat_core::sources::{pixabay_search_query, the_cat_api_breed_ids, wikimedia_search_query};
 use daily_cat_core::{
     AppConfig, Canvas, CatCountStrategy, ConfigError, ImageQuality, LanguagePreference,
-    LayoutEngine, SafeArea, SourceError, SourcePlanner,
+    LayoutEngine, SafeArea, SourcePlanner,
 };
 
 #[test]
@@ -76,13 +77,15 @@ fn image_quality_rejects_sub_hd_thresholds() {
 fn source_planner_prefers_local_then_cataas_then_the_cat_api() {
     let planner = SourcePlanner {
         local_dirs: vec!["C:/cats".into()],
+        wikimedia_commons_enabled: true,
         cataas_enabled: true,
         the_cat_api_enabled: true,
+        ..SourcePlanner::default()
     };
 
     assert_eq!(
         planner.ordered_sources().unwrap(),
-        vec!["local:C:/cats", "cataas", "thecatapi"]
+        vec!["local:C:/cats", "wikimedia", "thecatapi", "cataas", "generated"]
     );
 }
 
@@ -90,11 +93,57 @@ fn source_planner_prefers_local_then_cataas_then_the_cat_api() {
 fn source_planner_errors_when_no_sources_are_enabled() {
     let planner = SourcePlanner {
         local_dirs: Vec::new(),
+        wikimedia_commons_enabled: false,
         cataas_enabled: false,
         the_cat_api_enabled: false,
+        ..SourcePlanner::default()
     };
 
-    assert_eq!(planner.ordered_sources(), Err(SourceError::NoSources));
+    assert_eq!(planner.ordered_sources().unwrap(), vec!["generated"]);
+}
+
+#[test]
+fn breed_preferences_map_to_the_cat_api_ids() {
+    let ids = the_cat_api_breed_ids(&[
+        "british shorthair".to_string(),
+        "ragdoll".to_string(),
+        "maine coon".to_string(),
+        "siamese".to_string(),
+    ]);
+
+    assert_eq!(ids, vec!["bsho", "ragd", "mcoo", "siam"]);
+}
+
+#[test]
+fn wikimedia_query_uses_breed_and_image_mood() {
+    let query = wikimedia_search_query(
+        &["orange tabby".to_string()],
+        &[daily_cat_core::config::CatImageType::Kitten],
+    );
+
+    assert!(query.contains("orange tabby cat"));
+    assert!(query.contains("kitten"));
+}
+
+#[test]
+fn advanced_api_keys_enable_premium_sources_before_public_sources() {
+    let planner = SourcePlanner {
+        pixabay_api_key: Some("pixabay-key".to_string()),
+        magnific_api_key: Some("magnific-key".to_string()),
+        ..SourcePlanner::default()
+    };
+
+    assert_eq!(
+        planner.ordered_sources().unwrap(),
+        vec!["magnific", "pixabay", "wikimedia", "thecatapi", "cataas", "generated"]
+    );
+}
+
+#[test]
+fn pixabay_query_is_wallpaper_oriented() {
+    let query = pixabay_search_query(&["calico".to_string()], &[]);
+
+    assert_eq!(query, "calico cat wallpaper");
 }
 
 #[test]
