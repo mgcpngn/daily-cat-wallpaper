@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
 
-use crate::config::{AppConfig, CatImageType};
+use crate::config::{AppConfig, CatImageType, PromptTemplate};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CatCandidate {
@@ -149,14 +149,42 @@ pub fn transparent_cat_prompt(config: &AppConfig) -> String {
     } else {
         scene
     };
+    let template = prompt_template_instruction(&config.ai_generation.prompt_template);
 
     format!(
-        "Create one lifelike full-body {breed} cat as a transparent PNG cutout. \
-         The cat should feel like a small pet living on a computer desktop: {scene}. \
-         Mood cues: {moods}. No room, no wall, no floor, no props, no text, no frame, \
-         no shadow baked into a background. Isolated subject only, clean alpha channel, \
-         detailed fur, natural paws, ears, whiskers, and tail, complete body visible."
+        "Create one lifelike full-body {breed} cat as a Photoshop-compatible transparent layer \
+         asset for compositing over a computer desktop wallpaper. Professional prompt template: \
+         {template}. User scene intent: {scene}. Mood cues from user choices: {moods}. \
+         Output requirements: transparent PNG cutout, clean alpha channel, soft semi-transparent \
+         fur edges, natural whisker edge detail, no white halo, no black fringe, no colored matte, \
+         no visible checkerboard pattern, no flattened background. Lighting should be neutral and \
+         easy to blend with arbitrary wallpapers, with only a very subtle contact shadow or ambient \
+         occlusion carried in transparent alpha. The cat should feel like a small pet living on a \
+         computer desktop, not like a sticker pasted onto a background. No room, no wall, no floor, \
+         no furniture, no props, no text, no frame, no watermark. Isolated subject only, detailed \
+         fur, natural paws, ears, whiskers, and tail, complete body visible unless the selected \
+         template explicitly asks for a desktop-edge peek."
     )
+}
+
+fn prompt_template_instruction(template: &PromptTemplate) -> &'static str {
+    match template {
+        PromptTemplate::DesktopLayer => {
+            "desktop layer realism: a complete cat placed as a movable foreground layer, grounded by soft alpha contact shadow, relaxed pose, believable scale for a desktop pet"
+        }
+        PromptTemplate::TaskbarPeek => {
+            "taskbar peek: front paws and curious head visible above a taskbar edge, playful desktop-pet pose, keep the cat on a transparent canvas and do not draw the taskbar itself"
+        }
+        PromptTemplate::IconCompanion => {
+            "icon companion: small cat sitting beside desktop icons, compact silhouette, paws and tail arranged so it can live between icons without covering them"
+        }
+        PromptTemplate::WindowCorner => {
+            "window corner companion: cat leaning or stretching beside a lower window corner, natural weight and perspective, suitable for overlaying near app windows"
+        }
+        PromptTemplate::FloatingSticker => {
+            "floating transparent sticker: clean full-body subject with expressive pose, crisp but soft alpha edge, no environment, suitable as a draggable transparent overlay"
+        }
+    }
 }
 
 fn cat_search_query(breeds: &[String], image_types: &[CatImageType]) -> String {

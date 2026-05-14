@@ -5,7 +5,8 @@ use daily_cat_core::sources::{
     transparent_cat_prompt, wikimedia_search_query,
 };
 use daily_cat_core::{
-    AiImageProvider, AppConfig, CatCandidate, ImageQuality, SourceError, SourcePlanner,
+    AiImageProvider, AppConfig, CatCandidate, ImageQuality, InteractionConfig, SourceError,
+    SourcePlanner,
 };
 use directories::ProjectDirs;
 use image::{GenericImage, GenericImageView, ImageFormat};
@@ -140,6 +141,13 @@ pub struct ApiKeyValidation {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InteractionLayerPayload {
+    pub image_path: PathBuf,
+    pub image_data_url: String,
+    pub interactions: InteractionConfig,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct FeedbackStore {
     records: HashMap<String, FeedbackRecord>,
@@ -253,7 +261,7 @@ impl AppState {
                     height,
                     feedback_score,
                     rejected: feedback_score <= -2,
-                    thumbnail_data_url: thumbnail_data_url(&path).unwrap_or_default(),
+                    thumbnail_data_url: image_data_url(&path, 512).unwrap_or_default(),
                     path,
                 });
             }
@@ -331,6 +339,18 @@ impl AppState {
             && is_supported_image(path)
             && image_meets_quality(path, quality)
             && feedback.score_for_path(path) > -2)
+    }
+
+    pub fn interaction_layer_payload(
+        &self,
+        config: &AppConfig,
+    ) -> Result<InteractionLayerPayload, AppStateError> {
+        let path = self.interaction_layer_image_path(config)?;
+        Ok(InteractionLayerPayload {
+            image_data_url: image_data_url(&path, 900)?,
+            image_path: path,
+            interactions: config.interactions.clone(),
+        })
     }
 
     pub fn record_feedback(&self, input: FeedbackInput) -> Result<LearningSummary, AppStateError> {
@@ -555,6 +575,30 @@ impl AppState {
         fs::create_dir_all(&self.data_dir)?;
         fs::write(self.feedback_path(), serde_json::to_vec_pretty(feedback)?)?;
         Ok(())
+    }
+
+    fn interaction_layer_image_path(&self, config: &AppConfig) -> Result<PathBuf, AppStateError> {
+        if let Some(path) = config
+            .sources
+            .selected_gallery_image
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|path| {
+                self.gallery_image_is_usable(path, &config.image_quality)
+                    .unwrap_or(false)
+            })
+        {
+            return Ok(path);
+        }
+
+        let mut images = self.list_gallery_images(&config.image_quality)?;
+        images.retain(|image| image.meets_quality && !image.rejected);
+        images
+            .iter()
+            .find(|image| image.transparent)
+            .or_else(|| images.first())
+            .map(|image| image.path.clone())
+            .ok_or(AppStateError::NoCandidate)
     }
 
     async fn generate_openai_images(
@@ -1434,12 +1478,12 @@ fn gallery_image_from_path(
         transparent: image_has_transparency(path),
         feedback_score: 0,
         rejected: false,
-        thumbnail_data_url: thumbnail_data_url(path)?,
+        thumbnail_data_url: image_data_url(path, 512)?,
     })
 }
 
-fn thumbnail_data_url(path: &Path) -> Result<String, AppStateError> {
-    let image = image::open(path)?.thumbnail(512, 512);
+fn image_data_url(path: &Path, max_edge: u32) -> Result<String, AppStateError> {
+    let image = image::open(path)?.thumbnail(max_edge, max_edge);
     let mut bytes = Cursor::new(Vec::new());
     image.write_to(&mut bytes, ImageFormat::Png)?;
     Ok(format!(
@@ -2221,6 +2265,41 @@ mod tests {
         assert!(images.iter().all(|image| image
             .thumbnail_data_url
             .starts_with("data:image/png;base64,")));
+    }
+
+    #[test]
+    fn interaction_layer_payload_uses_selected_transparent_cat_image() {
+        let dir = tempdir().unwrap();
+        let state = test_state(dir.path());
+        let generated = state.gallery_generated_dir();
+        fs::create_dir_all(&generated).unwrap();
+        let cat_path = generated.join("overlay-cat.png");
+        transparent_test_cat(2560, 1440, 240, 120)
+            .save(&cat_path)
+            .unwrap();
+        let config = AppConfig {
+            sources: daily_cat_core::config::SourceConfig {
+                selected_gallery_image: Some(cat_path.to_string_lossy().to_string()),
+                ..Default::default()
+            },
+            interactions: InteractionConfig {
+                breathing: true,
+                mouse_proximity: true,
+                click_paw: true,
+                keyboard_bongo: true,
+                sound: false,
+            },
+            ..AppConfig::default()
+        };
+
+        let payload = state.interaction_layer_payload(&config).unwrap();
+
+        assert_eq!(payload.image_path, cat_path);
+        assert!(payload.image_data_url.starts_with("data:image/png;base64,"));
+        assert!(payload.interactions.breathing);
+        assert!(payload.interactions.mouse_proximity);
+        assert!(payload.interactions.click_paw);
+        assert!(payload.interactions.keyboard_bongo);
     }
 
     #[test]

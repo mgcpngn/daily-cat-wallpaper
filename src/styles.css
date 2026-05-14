@@ -44,6 +44,13 @@ button:disabled {
   opacity: 0.62;
 }
 
+body.overlay-mode {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+}
+
 .app-shell {
   padding: 32px;
 }
@@ -383,6 +390,21 @@ input[type="range"] {
   font-weight: 800;
 }
 
+.interaction-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.interaction-actions button {
+  border: 1px solid rgba(84, 62, 48, 0.24);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #f4dfca;
+  color: #332822;
+  font-weight: 800;
+}
+
 .hidden-file-input {
   display: none;
 }
@@ -486,6 +508,58 @@ input[type="range"] {
   transition: width 180ms ease;
 }
 
+.cat-overlay-stage {
+  display: grid;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  place-items: center;
+  overflow: hidden;
+  background: transparent;
+  outline: none;
+}
+
+.cat-overlay-button {
+  width: 96vw;
+  height: 96vh;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.cat-overlay-button:hover {
+  transform: none;
+}
+
+.cat-overlay-button img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 16px 18px rgba(26, 20, 16, 0.22));
+  transform-origin: 50% 78%;
+  transition:
+    filter 160ms ease,
+    transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.cat-overlay-stage.breathing .cat-overlay-button img {
+  animation: cat-breathe 3.4s ease-in-out infinite;
+}
+
+.cat-overlay-stage.near .cat-overlay-button img {
+  filter: drop-shadow(0 18px 20px rgba(26, 20, 16, 0.28)) saturate(1.08);
+  transform: translateY(-8px) rotate(-1.5deg) scale(1.035);
+}
+
+.cat-overlay-stage.paw .cat-overlay-button img,
+.cat-overlay-stage.bongo .cat-overlay-button img {
+  animation: cat-bop 260ms cubic-bezier(0.2, 1.3, 0.3, 1);
+}
+
 @keyframes breathe {
   0%,
   100% {
@@ -493,5 +567,25 @@ input[type="range"] {
   }
   50% {
     transform: translateY(-2%) scale(1.015);
+  }
+}
+
+@keyframes cat-breathe {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.012);
+  }
+}
+
+@keyframes cat-bop {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  45% {
+    transform: translateY(-14px) rotate(2deg) scale(1.05);
   }
 }

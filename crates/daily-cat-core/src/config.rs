@@ -131,6 +131,16 @@ pub enum AiImageProvider {
     QwenImage,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PromptTemplate {
+    #[default]
+    DesktopLayer,
+    TaskbarPeek,
+    IconCompanion,
+    WindowCorner,
+    FloatingSticker,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AiGenerationConfig {
     pub provider: AiImageProvider,
@@ -146,6 +156,8 @@ pub struct AiGenerationConfig {
     pub google_model: String,
     #[serde(default = "default_qwen_image_model")]
     pub qwen_model: String,
+    #[serde(default)]
+    pub prompt_template: PromptTemplate,
     pub scene: String,
     pub count: u8,
     pub transparent_cutout: bool,
@@ -275,6 +287,7 @@ impl Default for AiGenerationConfig {
             openai_model: default_openai_image_model(),
             google_model: default_google_image_model(),
             qwen_model: default_qwen_image_model(),
+            prompt_template: PromptTemplate::DesktopLayer,
             scene: "sitting naturally on the desktop edge".to_string(),
             count: 4,
             transparent_cutout: true,

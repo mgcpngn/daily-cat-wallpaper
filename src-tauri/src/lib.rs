@@ -7,11 +7,11 @@ use daily_cat_core::{
 };
 use state::{
     ApiKeyValidation, AppState, DisplayGeometry, FeedbackInput, GalleryImage, ImportImagePayload,
-    LearningSummary, WallpaperAnalysis, WallpaperResult,
+    InteractionLayerPayload, LearningSummary, WallpaperAnalysis, WallpaperResult,
 };
 use std::path::PathBuf;
 use std::process::Command;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use wallpaper_backend::NativeWallpaperBackend;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -21,6 +21,8 @@ struct AiGenerationProgress {
     current: usize,
     total: usize,
 }
+
+const INTERACTION_WINDOW_LABEL: &str = "cat-overlay";
 
 #[tauri::command]
 fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -49,6 +51,40 @@ fn preview_layout(cat_count: u8, width: u32, height: u32) -> Vec<Rect> {
 #[tauri::command]
 fn platform_capabilities() -> BackendCapabilities {
     NativeWallpaperBackend::new().capabilities()
+}
+
+#[tauri::command]
+fn get_interaction_layer(state: State<'_, AppState>) -> Result<InteractionLayerPayload, String> {
+    let config = state.load_config().map_err(|error| error.to_string())?;
+    state
+        .interaction_layer_payload(&config)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn start_interaction_layer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<InteractionLayerPayload, String> {
+    let config = state.load_config().map_err(|error| error.to_string())?;
+    let payload = state
+        .interaction_layer_payload(&config)
+        .map_err(|error| error.to_string())?;
+    ensure_interaction_window(&app)?;
+    let _ = app.emit_to(
+        INTERACTION_WINDOW_LABEL,
+        "interaction-layer-update",
+        payload.clone(),
+    );
+    Ok(payload)
+}
+
+#[tauri::command]
+fn stop_interaction_layer(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(INTERACTION_WINDOW_LABEL) {
+        window.close().map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -96,6 +132,12 @@ async fn refresh_wallpaper(
     NativeWallpaperBackend::new()
         .set_wallpaper(&image_path)
         .map_err(|error| error.to_string())?;
+
+    if config.platform_mode != daily_cat_core::config::PlatformMode::StaticOnly
+        && interactions_enabled(&config)
+    {
+        let _ = start_interaction_layer(app.clone(), state.clone());
+    }
 
     Ok(WallpaperResult {
         path: image_path,
@@ -291,6 +333,53 @@ fn source_planner_from_config(config: &AppConfig) -> SourcePlanner {
     }
 }
 
+fn interactions_enabled(config: &AppConfig) -> bool {
+    config.interactions.breathing
+        || config.interactions.mouse_proximity
+        || config.interactions.click_paw
+        || config.interactions.keyboard_bongo
+        || config.interactions.sound
+}
+
+fn ensure_interaction_window(app: &AppHandle) -> Result<(), String> {
+    if app.get_webview_window(INTERACTION_WINDOW_LABEL).is_some() {
+        return Ok(());
+    }
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        INTERACTION_WINDOW_LABEL,
+        WebviewUrl::App("index.html?overlay=1".into()),
+    )
+    .title("Daily Cat Overlay")
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .inner_size(420.0, 420.0)
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    if let Some(monitor) = app
+        .primary_monitor()
+        .map_err(|error| error.to_string())?
+        .or_else(|| {
+            app.available_monitors()
+                .ok()
+                .and_then(|monitors| monitors.into_iter().next())
+        })
+    {
+        let position = monitor.position();
+        let size = monitor.size();
+        let x = position.x + size.width.saturating_sub(480) as i32;
+        let y = position.y + size.height.saturating_sub(520) as i32;
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+    }
+
+    Ok(())
+}
+
 fn display_geometries_or_default(app: &AppHandle, config: &AppConfig) -> Vec<DisplayGeometry> {
     let displays = monitor_geometries(app);
     if displays.is_empty() {
@@ -364,6 +453,9 @@ pub fn run() {
             save_config,
             preview_layout,
             platform_capabilities,
+            get_interaction_layer,
+            start_interaction_layer,
+            stop_interaction_layer,
             display_summary,
             refresh_wallpaper,
             prefetch_wallpapers,

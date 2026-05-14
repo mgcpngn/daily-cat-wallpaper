@@ -16,6 +16,12 @@ type CatCountStrategy = "MatchDisplays" | "Fixed";
 type CatImageType = "Healing" | "Funny" | "Loaf" | "Kitten" | "Sleepy";
 type PlatformMode = "Automatic" | "StaticOnly" | "InteractionBeta";
 type AiImageProvider = "OpenAi" | "GoogleNanoBananaPro" | "QwenImage";
+type PromptTemplate =
+  | "DesktopLayer"
+  | "TaskbarPeek"
+  | "IconCompanion"
+  | "WindowCorner"
+  | "FloatingSticker";
 type ScheduleConfig =
   | "OnLogin"
   | "ManualOnly"
@@ -62,6 +68,7 @@ type AppConfig = {
     openai_model: string;
     google_model: string;
     qwen_model: string;
+    prompt_template: PromptTemplate;
     scene: string;
     count: number;
     transparent_cutout: boolean;
@@ -161,9 +168,16 @@ type AiGenerationProgress = {
   total: number;
 };
 
+type InteractionLayerPayload = {
+  image_path: string;
+  image_data_url: string;
+  interactions: AppConfig["interactions"];
+};
+
 declare global {
   interface Window {
     __TAURI_INTERNALS__?: unknown;
+    webkitAudioContext?: typeof AudioContext;
   }
 }
 
@@ -180,6 +194,13 @@ const BREEDS = [
 ];
 
 const IMAGE_TYPES: CatImageType[] = ["Healing", "Funny", "Loaf", "Kitten", "Sleepy"];
+const PROMPT_TEMPLATES: PromptTemplate[] = [
+  "DesktopLayer",
+  "TaskbarPeek",
+  "IconCompanion",
+  "WindowCorner",
+  "FloatingSticker",
+];
 const LANGUAGES: Array<{ value: LanguagePreference; labelKey: string }> = [
   { value: "Auto", labelKey: "language.auto" },
   { value: "English", labelKey: "language.en" },
@@ -229,6 +250,7 @@ const baseDefaultConfig: AppConfig = {
     openai_model: "gpt-image-1.5",
     google_model: "gemini-3-pro-image-preview",
     qwen_model: "qwen-image-2.0-pro",
+    prompt_template: "DesktopLayer",
     scene: "sitting naturally on the desktop edge",
     count: 4,
     transparent_cutout: true,
@@ -250,6 +272,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.prefetch": "Cache HD pack",
     "action.generateAi": "Generate transparent cats",
     "action.validateAiKey": "Validate API key",
+    "action.startInteraction": "Start interaction layer",
+    "action.stopInteraction": "Stop interaction layer",
     "action.save": "Save preferences",
     "action.select": "Use",
     "action.delete": "Delete",
@@ -274,6 +298,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.aiKeyValid": "API key OK: {model}",
     "status.aiElapsed": "Elapsed {seconds}s",
     "status.aiDoneAlert": "Transparent cat generation finished: {count} images.",
+    "status.interactionStarted": "Interaction layer started",
+    "status.interactionStopped": "Interaction layer stopped",
     "status.galleryLoaded": "Gallery loaded",
     "status.importing": "Importing selected cat images",
     "status.imported": "Imported {count} cat images",
@@ -323,6 +349,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.openaiModel": "OpenAI model",
     "field.googleModel": "Gemini model",
     "field.qwenModel": "Qwen model",
+    "field.promptTemplate": "Prompt template",
     "field.openaiKey": "OpenAI API key",
     "field.googleKey": "Google API key",
     "field.qwenKey": "DashScope API key",
@@ -334,6 +361,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.transparentCutout": "Creates a no-background cat asset that can be placed on the desktop.",
     "hint.aiKey": "Generation automatically validates the selected provider key before sending the image request.",
     "hint.aiProviderDefault": "Chinese locales default to Qwen Image 2.0 Pro. English locales default to OpenAI image generation, with Gemini available as an option.",
+    "hint.promptTemplate": "Templates are professional transparent-layer prompts; breed, image mood, and your scene are still merged automatically.",
     "hint.aiScene": "Example: peeking from the taskbar, sitting beside icons, stretching on the desktop edge.",
     "gallery.path": "Fixed gallery: {path}",
     "gallery.empty": "No cat images in the managed gallery yet. Import HD transparent cats or generate AI transparent cats first.",
@@ -390,6 +418,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.keyboard_bongo": "Keyboard rhythm reaction",
     "hint.sound": "Optional short sound effects",
     "hint.optional": "Optional behavior",
+    "prompt.DesktopLayer": "Desktop transparent layer",
+    "prompt.TaskbarPeek": "Peek over taskbar",
+    "prompt.IconCompanion": "Sit beside icons",
+    "prompt.WindowCorner": "Lean by window corner",
+    "prompt.FloatingSticker": "Floating sticker layer",
     "breed.mixed": "mixed",
     "breed.orange tabby": "orange tabby",
     "breed.british shorthair": "british shorthair",
@@ -413,6 +446,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.prefetch": "缓存高清猫图包",
     "action.generateAi": "生成透明猫",
     "action.validateAiKey": "校验 API Key",
+    "action.startInteraction": "启动互动层",
+    "action.stopInteraction": "停止互动层",
     "action.save": "保存配置",
     "action.select": "使用",
     "action.delete": "删除",
@@ -437,6 +472,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.aiKeyValid": "API Key 可用：{model}",
     "status.aiElapsed": "已等待 {seconds} 秒",
     "status.aiDoneAlert": "透明猫生成完成：{count} 张。",
+    "status.interactionStarted": "互动层已启动",
+    "status.interactionStopped": "互动层已停止",
     "status.galleryLoaded": "图库已加载",
     "status.importing": "正在导入已选择猫图",
     "status.imported": "已导入 {count} 张猫图",
@@ -485,6 +522,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.openaiModel": "OpenAI 模型",
     "field.googleModel": "Gemini 模型",
     "field.qwenModel": "通义万相模型",
+    "field.promptTemplate": "提示词模板",
     "field.openaiKey": "OpenAI API Key",
     "field.googleKey": "Google API Key",
     "field.qwenKey": "DashScope API Key",
@@ -496,6 +534,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.transparentCutout": "生成没有背景的猫咪素材，再放到桌面上。",
     "hint.aiKey": "生成前会自动校验当前选择的提供方 API Key，然后再发送图片生成请求。",
     "hint.aiProviderDefault": "中文环境默认使用通义万相 Qwen Image 2.0 Pro；英文环境默认使用 OpenAI 图片模型，Gemini 可手动选择。",
+    "hint.promptTemplate": "模板是专业透明图层提示词；品种、图片类型和你的场景仍会自动合并进去。",
     "hint.aiScene": "例如：从任务栏探头、坐在图标旁、趴在桌面边缘。",
     "gallery.path": "固定图库：{path}",
     "gallery.empty": "托管图库里还没有猫图。请先导入高清透明猫图，或生成 AI 透明猫。",
@@ -552,6 +591,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.keyboard_bongo": "跟随键盘节奏反应",
     "hint.sound": "可选短音效",
     "hint.optional": "可选行为",
+    "prompt.DesktopLayer": "桌面透明图层",
+    "prompt.TaskbarPeek": "从任务栏探头",
+    "prompt.IconCompanion": "坐在图标旁",
+    "prompt.WindowCorner": "靠在窗口角落",
+    "prompt.FloatingSticker": "漂浮贴纸图层",
     "breed.mixed": "混血猫",
     "breed.orange tabby": "橘猫",
     "breed.british shorthair": "英国短毛猫",
@@ -575,6 +619,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.prefetch": "快取高清貓圖包",
     "action.generateAi": "生成透明貓",
     "action.validateAiKey": "校驗 API Key",
+    "action.startInteraction": "啟動互動層",
+    "action.stopInteraction": "停止互動層",
     "action.save": "儲存設定",
     "action.select": "使用",
     "action.delete": "刪除",
@@ -599,6 +645,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.aiKeyValid": "API Key 可用：{model}",
     "status.aiElapsed": "已等待 {seconds} 秒",
     "status.aiDoneAlert": "透明貓生成完成：{count} 張。",
+    "status.interactionStarted": "互動層已啟動",
+    "status.interactionStopped": "互動層已停止",
     "status.galleryLoaded": "圖庫已載入",
     "status.importing": "正在匯入已選貓圖",
     "status.imported": "已匯入 {count} 張貓圖",
@@ -647,6 +695,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.openaiModel": "OpenAI 模型",
     "field.googleModel": "Gemini 模型",
     "field.qwenModel": "通義萬相模型",
+    "field.promptTemplate": "提示詞範本",
     "field.openaiKey": "OpenAI API Key",
     "field.googleKey": "Google API Key",
     "field.qwenKey": "DashScope API Key",
@@ -658,6 +707,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.transparentCutout": "生成無背景貓咪素材，再放到桌面上。",
     "hint.aiKey": "生成前會自動校驗目前選擇的提供方 API Key，然後再送出圖片生成請求。",
     "hint.aiProviderDefault": "中文環境預設使用通義萬相 Qwen Image 2.0 Pro；英文環境預設使用 OpenAI 圖片模型，Gemini 可手動選擇。",
+    "hint.promptTemplate": "範本是專業透明圖層提示詞；品種、圖片類型和你的場景仍會自動合併。",
     "hint.aiScene": "例如：從工作列探頭、坐在圖示旁、趴在桌面邊緣。",
     "gallery.path": "固定圖庫：{path}",
     "gallery.empty": "受管理圖庫裡還沒有貓圖。請先匯入高清透明貓圖，或生成 AI 透明貓。",
@@ -714,6 +764,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.keyboard_bongo": "跟隨鍵盤節奏反應",
     "hint.sound": "可選短音效",
     "hint.optional": "可選行為",
+    "prompt.DesktopLayer": "桌面透明圖層",
+    "prompt.TaskbarPeek": "從工作列探頭",
+    "prompt.IconCompanion": "坐在圖示旁",
+    "prompt.WindowCorner": "靠在視窗角落",
+    "prompt.FloatingSticker": "漂浮貼紙圖層",
     "breed.mixed": "混種貓",
     "breed.orange tabby": "橘貓",
     "breed.british shorthair": "英國短毛貓",
@@ -737,6 +792,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.prefetch": "HD パックを保存",
     "action.generateAi": "透明猫を生成",
     "action.validateAiKey": "API キーを検証",
+    "action.startInteraction": "インタラクション層を開始",
+    "action.stopInteraction": "インタラクション層を停止",
     "action.save": "設定を保存",
     "action.select": "使う",
     "action.delete": "削除",
@@ -761,6 +818,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.aiKeyValid": "API キー OK: {model}",
     "status.aiElapsed": "経過 {seconds} 秒",
     "status.aiDoneAlert": "透明猫の生成が完了しました: {count} 枚。",
+    "status.interactionStarted": "インタラクション層を開始しました",
+    "status.interactionStopped": "インタラクション層を停止しました",
     "status.galleryLoaded": "ギャラリーを読み込みました",
     "status.importing": "選択した猫画像を読み込み中",
     "status.imported": "{count} 枚の猫画像を読み込みました",
@@ -809,6 +868,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.openaiModel": "OpenAI モデル",
     "field.googleModel": "Gemini モデル",
     "field.qwenModel": "Qwen モデル",
+    "field.promptTemplate": "プロンプトテンプレート",
     "field.openaiKey": "OpenAI API キー",
     "field.googleKey": "Google API キー",
     "field.qwenKey": "DashScope API キー",
@@ -820,6 +880,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.transparentCutout": "背景なしの猫素材を作り、デスクトップに配置します。",
     "hint.aiKey": "生成前に選択したプロバイダーの API キーを自動検証し、その後に画像生成リクエストを送ります。",
     "hint.aiProviderDefault": "中国語環境では Qwen Image 2.0 Pro、英語環境では OpenAI 画像モデルを既定にし、Gemini も選択できます。",
+    "hint.promptTemplate": "テンプレートは透明レイヤー向けの専門プロンプトです。品種、画像ムード、場面は自動で結合されます。",
     "hint.aiScene": "例: タスクバーから覗く、アイコン横に座る、デスクトップ端で伸びる。",
     "gallery.path": "固定ギャラリー: {path}",
     "gallery.empty": "管理ギャラリーに猫画像はまだありません。HD の透明猫画像を読み込むか、AI 透明猫を生成してください。",
@@ -876,6 +937,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.keyboard_bongo": "キー入力リズムへの反応",
     "hint.sound": "任意の短い効果音",
     "hint.optional": "任意の動作",
+    "prompt.DesktopLayer": "デスクトップ透明レイヤー",
+    "prompt.TaskbarPeek": "タスクバーから覗く",
+    "prompt.IconCompanion": "アイコン横に座る",
+    "prompt.WindowCorner": "ウィンドウ角に寄る",
+    "prompt.FloatingSticker": "浮遊ステッカーレイヤー",
     "breed.mixed": "ミックス",
     "breed.orange tabby": "茶トラ",
     "breed.british shorthair": "ブリティッシュショートヘア",
@@ -899,6 +965,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.prefetch": "HD 팩 캐시",
     "action.generateAi": "투명 고양이 생성",
     "action.validateAiKey": "API 키 검증",
+    "action.startInteraction": "상호작용 레이어 시작",
+    "action.stopInteraction": "상호작용 레이어 중지",
     "action.save": "설정 저장",
     "action.select": "사용",
     "action.delete": "삭제",
@@ -923,6 +991,8 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.aiKeyValid": "API 키 정상: {model}",
     "status.aiElapsed": "경과 {seconds}초",
     "status.aiDoneAlert": "투명 고양이 생성 완료: {count}장.",
+    "status.interactionStarted": "상호작용 레이어 시작됨",
+    "status.interactionStopped": "상호작용 레이어 중지됨",
     "status.galleryLoaded": "갤러리 로드됨",
     "status.importing": "선택한 고양이 이미지 가져오는 중",
     "status.imported": "고양이 이미지 {count}장 가져옴",
@@ -971,6 +1041,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.openaiModel": "OpenAI 모델",
     "field.googleModel": "Gemini 모델",
     "field.qwenModel": "Qwen 모델",
+    "field.promptTemplate": "프롬프트 템플릿",
     "field.openaiKey": "OpenAI API 키",
     "field.googleKey": "Google API 키",
     "field.qwenKey": "DashScope API 키",
@@ -982,6 +1053,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.transparentCutout": "배경 없는 고양이 소재를 만들어 데스크톱에 배치합니다.",
     "hint.aiKey": "생성 전 선택한 제공자의 API 키를 자동 검증한 뒤 이미지 생성 요청을 보냅니다.",
     "hint.aiProviderDefault": "중국어 환경은 Qwen Image 2.0 Pro를 기본값으로, 영어 환경은 OpenAI 이미지 모델을 기본값으로 사용하며 Gemini도 선택할 수 있습니다.",
+    "hint.promptTemplate": "템플릿은 투명 레이어용 전문 프롬프트입니다. 품종, 이미지 분위기, 장면은 자동으로 합쳐집니다.",
     "hint.aiScene": "예: 작업 표시줄에서 고개 내밀기, 아이콘 옆에 앉기, 화면 가장자리에서 스트레칭.",
     "gallery.path": "고정 갤러리: {path}",
     "gallery.empty": "관리 갤러리에 아직 고양이 이미지가 없습니다. HD 투명 고양이 이미지를 가져오거나 AI 투명 고양이를 먼저 생성하세요.",
@@ -1038,6 +1110,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "hint.keyboard_bongo": "키보드 리듬 반응",
     "hint.sound": "선택적 짧은 효과음",
     "hint.optional": "선택 동작",
+    "prompt.DesktopLayer": "데스크톱 투명 레이어",
+    "prompt.TaskbarPeek": "작업 표시줄 위로 보기",
+    "prompt.IconCompanion": "아이콘 옆에 앉기",
+    "prompt.WindowCorner": "창 모서리에 기대기",
+    "prompt.FloatingSticker": "플로팅 스티커 레이어",
     "breed.mixed": "믹스",
     "breed.orange tabby": "치즈 태비",
     "breed.british shorthair": "브리티시 쇼트헤어",
@@ -1296,6 +1373,27 @@ function App() {
       setStatus(message);
     } catch (error) {
       setAiKeyStatus(String(error));
+      setStatus(String(error));
+    }
+  }
+
+  async function startInteractionLayer() {
+    setStatus("status.saving");
+    try {
+      const saved = await safeInvoke<AppConfig>("save_config", { config }, config);
+      setConfig(mergeConfig(saved));
+      await safeInvoke<InteractionLayerPayload>("start_interaction_layer");
+      setStatus("status.interactionStarted");
+    } catch (error) {
+      setStatus(String(error));
+    }
+  }
+
+  async function stopInteractionLayer() {
+    try {
+      await safeInvoke("stop_interaction_layer");
+      setStatus("status.interactionStopped");
+    } catch (error) {
       setStatus(String(error));
     }
   }
@@ -1658,6 +1756,14 @@ function App() {
                 />
               </label>
             ))}
+            <div className="interaction-actions">
+              <button className="secondary" type="button" onClick={startInteractionLayer}>
+                {t("action.startInteraction")}
+              </button>
+              <button type="button" onClick={stopInteractionLayer}>
+                {t("action.stopInteraction")}
+              </button>
+            </div>
           </Panel>
 
           <Panel title={t("panel.schedule")}>
@@ -1937,6 +2043,28 @@ function App() {
                   })
                 }
               />
+            </label>
+            <label className="field">
+              {t("field.promptTemplate")}
+              <select
+                value={config.ai_generation.prompt_template}
+                onChange={(event) =>
+                  setConfig({
+                    ...config,
+                    ai_generation: {
+                      ...config.ai_generation,
+                      prompt_template: event.currentTarget.value as PromptTemplate,
+                    },
+                  })
+                }
+              >
+                {PROMPT_TEMPLATES.map((template) => (
+                  <option key={template} value={template}>
+                    {t(`prompt.${template}`)}
+                  </option>
+                ))}
+              </select>
+              <small>{t("hint.promptTemplate")}</small>
             </label>
             <label className="field">
               {t("field.openaiKey")}
@@ -2235,6 +2363,111 @@ function App() {
   );
 }
 
+function CatOverlay() {
+  const [payload, setPayload] = useState<InteractionLayerPayload | null>(null);
+  const [near, setNear] = useState(false);
+  const [paw, setPaw] = useState(false);
+  const [bongo, setBongo] = useState(false);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    document.body.classList.add("overlay-mode");
+    return () => document.body.classList.remove("overlay-mode");
+  }, []);
+
+  useEffect(() => {
+    safeInvoke<InteractionLayerPayload>("get_interaction_layer")
+      .then(setPayload)
+      .catch(() => undefined);
+    if (!hasTauriRuntime()) return;
+    let cancelled = false;
+    let unlistenHandler: (() => void) | undefined;
+    listen<InteractionLayerPayload>("interaction-layer-update", (event) => {
+      if (!cancelled) setPayload(event.payload);
+    }).then((unlisten) => {
+      unlistenHandler = unlisten;
+      if (cancelled) unlisten();
+    });
+    return () => {
+      cancelled = true;
+      unlistenHandler?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    stageRef.current?.focus();
+  }, [payload]);
+
+  function pulse(setter: React.Dispatch<React.SetStateAction<boolean>>) {
+    setter(true);
+    window.setTimeout(() => setter(false), 260);
+  }
+
+  function playSoftClick() {
+    if (!payload?.interactions.sound) return;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const audio = new AudioContextClass();
+    const oscillator = audio.createOscillator();
+    const gain = audio.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(520, audio.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(720, audio.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.0001, audio.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.08, audio.currentTime + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.14);
+    oscillator.connect(gain).connect(audio.destination);
+    oscillator.start();
+    oscillator.stop(audio.currentTime + 0.16);
+  }
+
+  if (!payload) {
+    return <main className="cat-overlay-stage" />;
+  }
+
+  return (
+    <main
+      ref={stageRef}
+      className={[
+        "cat-overlay-stage",
+        payload.interactions.breathing ? "breathing" : "",
+        payload.interactions.mouse_proximity && near ? "near" : "",
+        payload.interactions.click_paw && paw ? "paw" : "",
+        payload.interactions.keyboard_bongo && bongo ? "bongo" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      tabIndex={0}
+      onKeyDown={() => {
+        if (!payload.interactions.keyboard_bongo) return;
+        pulse(setBongo);
+        playSoftClick();
+      }}
+      onMouseMove={(event) => {
+        if (!payload.interactions.mouse_proximity) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const distance = Math.hypot(event.clientX - centerX, event.clientY - centerY);
+        setNear(distance < Math.min(rect.width, rect.height) * 0.42);
+      }}
+      onMouseLeave={() => setNear(false)}
+    >
+      <button
+        aria-label="cat interaction layer"
+        className="cat-overlay-button"
+        type="button"
+        onClick={() => {
+          if (payload.interactions.click_paw) pulse(setPaw);
+          playSoftClick();
+        }}
+      >
+        <img alt="" src={payload.image_data_url} />
+      </button>
+    </main>
+  );
+}
+
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="panel">
@@ -2511,4 +2744,8 @@ function aiProgressMessage(
   return progress.message;
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+function isOverlayPage(): boolean {
+  return new URLSearchParams(window.location.search).has("overlay");
+}
+
+createRoot(document.getElementById("root")!).render(isOverlayPage() ? <CatOverlay /> : <App />);

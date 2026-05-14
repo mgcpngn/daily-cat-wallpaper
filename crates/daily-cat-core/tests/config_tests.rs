@@ -4,7 +4,7 @@ use daily_cat_core::sources::{
 };
 use daily_cat_core::{
     AiImageProvider, AppConfig, Canvas, CatCountStrategy, ConfigError, ImageQuality,
-    LanguagePreference, LayoutEngine, SafeArea, SourcePlanner,
+    LanguagePreference, LayoutEngine, PromptTemplate, SafeArea, SourcePlanner,
 };
 
 #[test]
@@ -53,6 +53,16 @@ fn english_locale_ai_defaults_to_openai_image_generation() {
 
     assert_eq!(ai.provider, AiImageProvider::OpenAi);
     assert_eq!(ai.openai_model, "gpt-image-1.5");
+}
+
+#[test]
+fn ai_generation_defaults_to_desktop_layer_prompt_template() {
+    let config = AppConfig::default();
+
+    assert_eq!(
+        config.ai_generation.prompt_template,
+        PromptTemplate::DesktopLayer
+    );
 }
 
 #[test]
@@ -205,9 +215,37 @@ fn ai_prompt_requests_lifelike_transparent_desktop_pet_cutout() {
     let prompt = transparent_cat_prompt(&config);
 
     assert!(prompt.contains("transparent PNG cutout"));
+    assert!(prompt.contains("Photoshop-compatible transparent layer"));
+    assert!(prompt.contains("soft semi-transparent fur edges"));
+    assert!(prompt.contains("no white halo, no black fringe"));
     assert!(prompt.contains("computer desktop"));
     assert!(prompt.contains("complete body visible"));
     assert!(prompt.contains("No room"));
+}
+
+#[test]
+fn ai_prompt_template_combines_pose_with_user_scene_and_cat_preferences() {
+    let config = AppConfig {
+        breeds: vec!["orange tabby".to_string()],
+        image_types: vec![
+            daily_cat_core::config::CatImageType::Funny,
+            daily_cat_core::config::CatImageType::Kitten,
+        ],
+        ai_generation: daily_cat_core::config::AiGenerationConfig {
+            prompt_template: PromptTemplate::TaskbarPeek,
+            scene: "peeking over a translucent taskbar".to_string(),
+            ..Default::default()
+        },
+        ..AppConfig::default()
+    };
+
+    let prompt = transparent_cat_prompt(&config);
+
+    assert!(prompt.contains("orange tabby"));
+    assert!(prompt.contains("playful and expressive"));
+    assert!(prompt.contains("kitten-like charm"));
+    assert!(prompt.contains("peeking over a translucent taskbar"));
+    assert!(prompt.contains("front paws and curious head visible above a taskbar edge"));
 }
 
 #[test]

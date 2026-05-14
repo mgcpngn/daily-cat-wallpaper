@@ -6,7 +6,7 @@ pub mod wallpaper;
 
 pub use config::{
     AiGenerationConfig, AiImageProvider, AppConfig, CatCountStrategy, ConfigError, ImageQuality,
-    LanguagePreference,
+    InteractionConfig, LanguagePreference, PromptTemplate,
 };
 pub use layout::{Canvas, LayoutEngine, Rect, SafeArea};
 pub use scheduler::{RefreshDecision, RefreshTrigger, Scheduler};
