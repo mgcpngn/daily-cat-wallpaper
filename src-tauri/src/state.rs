@@ -8,12 +8,13 @@ use daily_cat_core::{
     AiImageProvider, AppConfig, CatCandidate, ImageQuality, SourceError, SourcePlanner,
 };
 use directories::ProjectDirs;
-use image::{GenericImage, GenericImageView};
+use image::{GenericImage, GenericImageView, ImageFormat};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -38,6 +39,8 @@ pub enum AppStateError {
     MissingAiApiKey,
     #[error("AI image generation response did not contain image data")]
     MissingAiImageData,
+    #[error("AI provider rejected the request: {0}")]
+    AiProvider(String),
     #[error("no image candidate could be resolved")]
     NoCandidate,
     #[error("no display geometry is available")]
@@ -72,6 +75,7 @@ pub struct GalleryImage {
     pub transparent: bool,
     pub feedback_score: i32,
     pub rejected: bool,
+    pub thumbnail_data_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -128,6 +132,14 @@ pub struct LearningSummary {
     pub top_reasons: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApiKeyValidation {
+    pub provider: AiImageProvider,
+    pub model: String,
+    pub valid: bool,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct FeedbackStore {
     records: HashMap<String, FeedbackRecord>,
@@ -155,7 +167,10 @@ impl AppState {
 
         Self {
             data_dir,
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(180))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
         }
     }
 
@@ -230,6 +245,7 @@ impl AppState {
                     height,
                     feedback_score,
                     rejected: feedback_score <= -2,
+                    thumbnail_data_url: thumbnail_data_url(&path).unwrap_or_default(),
                     path,
                 });
             }
@@ -390,6 +406,62 @@ impl AppState {
         compose_display_wallpaper(&output_dir, displays, image_paths, assignments)
     }
 
+    pub async fn validate_ai_api_key(
+        &self,
+        config: &AppConfig,
+    ) -> Result<ApiKeyValidation, AppStateError> {
+        match config.ai_generation.provider {
+            AiImageProvider::OpenAi => {
+                let api_key = config
+                    .ai_generation
+                    .openai_api_key
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|key| !key.is_empty())
+                    .ok_or(AppStateError::MissingAiApiKey)?;
+                let model = openai_image_model(config).to_string();
+                let response = self
+                    .client
+                    .get(format!("https://api.openai.com/v1/models/{model}"))
+                    .bearer_auth(api_key)
+                    .send()
+                    .await?;
+                provider_response_or_error(response).await?;
+                Ok(ApiKeyValidation {
+                    provider: AiImageProvider::OpenAi,
+                    model,
+                    valid: true,
+                    message: "OpenAI API key and image model are reachable".to_string(),
+                })
+            }
+            AiImageProvider::GoogleNanoBananaPro => {
+                let api_key = config
+                    .ai_generation
+                    .google_api_key
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|key| !key.is_empty())
+                    .ok_or(AppStateError::MissingAiApiKey)?;
+                let model = google_model_name(config);
+                let response = self
+                    .client
+                    .get(format!(
+                        "https://generativelanguage.googleapis.com/v1beta/models/{model}"
+                    ))
+                    .header("x-goog-api-key", api_key)
+                    .send()
+                    .await?;
+                provider_response_or_error(response).await?;
+                Ok(ApiKeyValidation {
+                    provider: AiImageProvider::GoogleNanoBananaPro,
+                    model,
+                    valid: true,
+                    message: "Gemini API key and image model are reachable".to_string(),
+                })
+            }
+        }
+    }
+
     pub async fn generate_ai_cat_images(
         &self,
         config: &AppConfig,
@@ -461,13 +533,7 @@ impl AppState {
             .map(str::trim)
             .filter(|key| !key.is_empty())
             .ok_or(AppStateError::MissingAiApiKey)?;
-        let model = if config.ai_generation.transparent_cutout
-            && config.ai_generation.openai_model.trim() == "gpt-image-2"
-        {
-            "gpt-image-1.5"
-        } else {
-            config.ai_generation.openai_model.trim()
-        };
+        let model = openai_image_model(config);
 
         #[derive(Debug, Deserialize)]
         struct OpenAiImageResponse {
@@ -493,8 +559,9 @@ impl AppState {
                 "output_format": "png"
             }))
             .send()
+            .await?;
+        let response = provider_response_or_error(response)
             .await?
-            .error_for_status()?
             .json::<OpenAiImageResponse>()
             .await?;
 
@@ -520,7 +587,7 @@ impl AppState {
             .map(str::trim)
             .filter(|key| !key.is_empty())
             .ok_or(AppStateError::MissingAiApiKey)?;
-        let model = config.ai_generation.google_model.trim();
+        let model = google_model_name(config);
 
         #[derive(Debug, Deserialize)]
         struct GoogleResponse {
@@ -548,31 +615,17 @@ impl AppState {
             data: String,
         }
 
-        let request_prompt = if count <= 1 {
-            prompt.to_string()
-        } else {
-            format!("{prompt} Generate {count} distinct cat cutout variants in this response.")
-        };
-
         let response = self
             .client
             .post(format!(
                 "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             ))
             .header("x-goog-api-key", api_key)
-            .json(&serde_json::json!({
-                "contents": [{"parts": [{"text": request_prompt}]}],
-                "generationConfig": {
-                    "responseModalities": ["IMAGE"],
-                    "thinkingConfig": {
-                        "thinkingLevel": "High",
-                        "includeThoughts": false
-                    }
-                }
-            }))
+            .json(&google_image_request(prompt, count))
             .send()
+            .await?;
+        let response = provider_response_or_error(response)
             .await?
-            .error_for_status()?
             .json::<GoogleResponse>()
             .await?;
 
@@ -1087,6 +1140,55 @@ fn decode_image_payloads(payloads: Vec<String>) -> Result<Vec<Vec<u8>>, AppState
     }
 }
 
+async fn provider_response_or_error(
+    response: reqwest::Response,
+) -> Result<reqwest::Response, AppStateError> {
+    if response.status().is_success() {
+        return Ok(response);
+    }
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    let body = body.chars().take(600).collect::<String>();
+    Err(AppStateError::AiProvider(format!("{status}: {body}")))
+}
+
+fn openai_image_model(config: &AppConfig) -> &str {
+    if config.ai_generation.transparent_cutout
+        && config.ai_generation.openai_model.trim() == "gpt-image-2"
+    {
+        "gpt-image-1.5"
+    } else {
+        config.ai_generation.openai_model.trim()
+    }
+}
+
+fn google_model_name(config: &AppConfig) -> String {
+    config
+        .ai_generation
+        .google_model
+        .trim()
+        .trim_start_matches("models/")
+        .to_string()
+}
+
+fn google_image_request(prompt: &str, count: usize) -> serde_json::Value {
+    let prompt = if count <= 1 {
+        prompt.to_string()
+    } else {
+        format!("{prompt} Generate {count} distinct cat cutout variants in this response.")
+    };
+    serde_json::json!({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+            "imageConfig": {
+                "aspectRatio": "1:1",
+                "imageSize": "2K"
+            }
+        }
+    })
+}
+
 fn write_verified_image(
     output_path: &Path,
     bytes: &[u8],
@@ -1165,7 +1267,18 @@ fn gallery_image_from_path(
         transparent: image_has_transparency(path),
         feedback_score: 0,
         rejected: false,
+        thumbnail_data_url: thumbnail_data_url(path)?,
     })
+}
+
+fn thumbnail_data_url(path: &Path) -> Result<String, AppStateError> {
+    let image = image::open(path)?.thumbnail(512, 512);
+    let mut bytes = Cursor::new(Vec::new());
+    image.write_to(&mut bytes, ImageFormat::Png)?;
+    Ok(format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes.into_inner())
+    ))
 }
 
 fn image_has_transparency(path: &Path) -> bool {
@@ -1938,6 +2051,27 @@ mod tests {
         assert!(images
             .iter()
             .any(|image| image.file_name == "small.jpg" && !image.meets_quality));
+        assert!(images.iter().all(|image| image
+            .thumbnail_data_url
+            .starts_with("data:image/png;base64,")));
+    }
+
+    #[test]
+    fn google_image_request_asks_for_image_and_2k_output() {
+        let request = google_image_request("transparent cat prompt", 2);
+
+        assert_eq!(
+            request["generationConfig"]["responseModalities"],
+            serde_json::json!(["TEXT", "IMAGE"])
+        );
+        assert_eq!(
+            request["generationConfig"]["imageConfig"]["imageSize"],
+            serde_json::json!("2K")
+        );
+        assert!(request["contents"][0]["parts"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("transparent cat prompt"));
     }
 
     #[test]

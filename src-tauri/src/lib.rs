@@ -6,13 +6,21 @@ use daily_cat_core::{
     WallpaperBackend,
 };
 use state::{
-    AppState, DisplayGeometry, FeedbackInput, GalleryImage, ImportImagePayload, LearningSummary,
-    WallpaperAnalysis, WallpaperResult,
+    ApiKeyValidation, AppState, DisplayGeometry, FeedbackInput, GalleryImage, ImportImagePayload,
+    LearningSummary, WallpaperAnalysis, WallpaperResult,
 };
 use std::path::PathBuf;
 use std::process::Command;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use wallpaper_backend::NativeWallpaperBackend;
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct AiGenerationProgress {
+    stage: &'static str,
+    message: String,
+    current: usize,
+    total: usize,
+}
 
 #[tauri::command]
 fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -141,6 +149,15 @@ fn import_gallery_images(
 }
 
 #[tauri::command]
+async fn validate_ai_api_key(state: State<'_, AppState>) -> Result<ApiKeyValidation, String> {
+    let config = state.load_config().map_err(|error| error.to_string())?;
+    state
+        .validate_ai_api_key(&config)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn select_gallery_image(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -162,14 +179,38 @@ async fn select_gallery_image(
 
 #[tauri::command]
 async fn generate_ai_cat_images(
+    app: AppHandle,
     state: State<'_, AppState>,
     count: usize,
 ) -> Result<Vec<GalleryImage>, String> {
     let mut config = state.load_config().map_err(|error| error.to_string())?;
-    let paths = state
-        .generate_ai_cat_images(&config, count)
-        .await
-        .map_err(|error| error.to_string())?;
+    let total = count.max(1);
+    emit_ai_progress(&app, "validating", "Validating AI API key", 0, total);
+    if let Err(error) = state.validate_ai_api_key(&config).await {
+        emit_ai_progress(&app, "failed", error.to_string(), 0, total);
+        return Err(error.to_string());
+    }
+    emit_ai_progress(
+        &app,
+        "requesting",
+        "Requesting transparent cat images",
+        0,
+        total,
+    );
+    let paths = match state.generate_ai_cat_images(&config, count).await {
+        Ok(paths) => paths,
+        Err(error) => {
+            emit_ai_progress(&app, "failed", error.to_string(), 0, total);
+            return Err(error.to_string());
+        }
+    };
+    emit_ai_progress(
+        &app,
+        "saving",
+        format!("Saved {} generated cat images", paths.len()),
+        paths.len(),
+        total,
+    );
     if config.ai_generation.auto_use_generated {
         if let Some(path) = paths.first() {
             config.sources.selected_gallery_image = Some(path.to_string_lossy().to_string());
@@ -178,6 +219,13 @@ async fn generate_ai_cat_images(
                 .map_err(|error| error.to_string())?;
         }
     }
+    emit_ai_progress(
+        &app,
+        "completed",
+        format!("Generated {} transparent cat images", paths.len()),
+        paths.len(),
+        total,
+    );
     state
         .list_gallery_images(&config.image_quality)
         .map_err(|error| error.to_string())
@@ -289,6 +337,24 @@ fn open_directory(path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
+fn emit_ai_progress(
+    app: &AppHandle,
+    stage: &'static str,
+    message: impl Into<String>,
+    current: usize,
+    total: usize,
+) {
+    let _ = app.emit(
+        "ai-generation-progress",
+        AiGenerationProgress {
+            stage,
+            message: message.into(),
+            current,
+            total,
+        },
+    );
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -306,6 +372,7 @@ pub fn run() {
             gallery_location,
             open_gallery_folder,
             import_gallery_images,
+            validate_ai_api_key,
             select_gallery_image,
             generate_ai_cat_images,
             record_wallpaper_feedback,

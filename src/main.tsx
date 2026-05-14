@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import "./styles.css";
 
 type Locale = "en" | "zh-Hans" | "zh-Hant" | "ja" | "ko";
@@ -129,6 +130,7 @@ type GalleryImage = {
   transparent: boolean;
   feedback_score: number;
   rejected: boolean;
+  thumbnail_data_url: string;
 };
 
 type ImportImagePayload = {
@@ -141,6 +143,20 @@ type LearningSummary = {
   disliked: number;
   rejected_images: number;
   top_reasons: string[];
+};
+
+type ApiKeyValidation = {
+  provider: AiImageProvider;
+  model: string;
+  valid: boolean;
+  message: string;
+};
+
+type AiGenerationProgress = {
+  stage: "idle" | "validating" | "requesting" | "saving" | "completed" | "failed";
+  message: string;
+  current: number;
+  total: number;
 };
 
 declare global {
@@ -227,6 +243,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.refresh": "Refresh now",
     "action.prefetch": "Cache HD pack",
     "action.generateAi": "Generate transparent cats",
+    "action.validateAiKey": "Validate API key",
     "action.save": "Save preferences",
     "action.select": "Use",
     "action.delete": "Delete",
@@ -246,6 +263,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.prefetched": "Cached {count} HD cat images",
     "status.generatingAi": "Generating transparent cat cutouts",
     "status.generatedAi": "Generated {count} transparent cats",
+    "status.validatingAiKey": "Validating AI API key",
+    "status.savingAi": "Saving generated cat images",
+    "status.aiKeyValid": "API key OK: {model}",
+    "status.aiElapsed": "Elapsed {seconds}s",
+    "status.aiDoneAlert": "Transparent cat generation finished: {count} images.",
     "status.galleryLoaded": "Gallery loaded",
     "status.importing": "Importing selected cat images",
     "status.imported": "Imported {count} cat images",
@@ -298,7 +320,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.aiCount": "Images to generate",
     "field.transparentCutout": "Transparent PNG cutout",
     "field.autoUseGenerated": "Auto-use newest generated cat",
+    "field.aiProgress": "Generation monitor",
     "hint.transparentCutout": "Creates a no-background cat asset that can be placed on the desktop.",
+    "hint.aiKey": "Generation automatically validates the selected provider key before sending the image request.",
     "hint.aiScene": "Example: peeking from the taskbar, sitting beside icons, stretching on the desktop edge.",
     "gallery.path": "Fixed gallery: {path}",
     "gallery.empty": "No cat images in the managed gallery yet. Import HD transparent cats or generate AI transparent cats first.",
@@ -377,6 +401,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.refresh": "立即换猫",
     "action.prefetch": "缓存高清猫图包",
     "action.generateAi": "生成透明猫",
+    "action.validateAiKey": "校验 API Key",
     "action.save": "保存配置",
     "action.select": "使用",
     "action.delete": "删除",
@@ -396,6 +421,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.prefetched": "已缓存 {count} 张高清猫图",
     "status.generatingAi": "正在生成透明猫抠图",
     "status.generatedAi": "已生成 {count} 张透明猫图",
+    "status.validatingAiKey": "正在校验 AI API Key",
+    "status.savingAi": "正在保存生成的猫图",
+    "status.aiKeyValid": "API Key 可用：{model}",
+    "status.aiElapsed": "已等待 {seconds} 秒",
+    "status.aiDoneAlert": "透明猫生成完成：{count} 张。",
     "status.galleryLoaded": "图库已加载",
     "status.importing": "正在导入已选择猫图",
     "status.imported": "已导入 {count} 张猫图",
@@ -447,7 +477,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.aiCount": "生成数量",
     "field.transparentCutout": "透明 PNG 抠图",
     "field.autoUseGenerated": "自动使用最新生成猫图",
+    "field.aiProgress": "生成过程监控",
     "hint.transparentCutout": "生成没有背景的猫咪素材，再放到桌面上。",
+    "hint.aiKey": "生成前会自动校验当前选择的提供方 API Key，然后再发送图片生成请求。",
     "hint.aiScene": "例如：从任务栏探头、坐在图标旁、趴在桌面边缘。",
     "gallery.path": "固定图库：{path}",
     "gallery.empty": "托管图库里还没有猫图。请先导入高清透明猫图，或生成 AI 透明猫。",
@@ -526,6 +558,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.refresh": "立即換貓",
     "action.prefetch": "快取高清貓圖包",
     "action.generateAi": "生成透明貓",
+    "action.validateAiKey": "校驗 API Key",
     "action.save": "儲存設定",
     "action.select": "使用",
     "action.delete": "刪除",
@@ -545,6 +578,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.prefetched": "已快取 {count} 張高清貓圖",
     "status.generatingAi": "正在生成透明貓去背圖",
     "status.generatedAi": "已生成 {count} 張透明貓圖",
+    "status.validatingAiKey": "正在校驗 AI API Key",
+    "status.savingAi": "正在儲存生成的貓圖",
+    "status.aiKeyValid": "API Key 可用：{model}",
+    "status.aiElapsed": "已等待 {seconds} 秒",
+    "status.aiDoneAlert": "透明貓生成完成：{count} 張。",
     "status.galleryLoaded": "圖庫已載入",
     "status.importing": "正在匯入已選貓圖",
     "status.imported": "已匯入 {count} 張貓圖",
@@ -596,7 +634,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.aiCount": "生成數量",
     "field.transparentCutout": "透明 PNG 去背",
     "field.autoUseGenerated": "自動使用最新生成貓圖",
+    "field.aiProgress": "生成過程監控",
     "hint.transparentCutout": "生成無背景貓咪素材，再放到桌面上。",
+    "hint.aiKey": "生成前會自動校驗目前選擇的提供方 API Key，然後再送出圖片生成請求。",
     "hint.aiScene": "例如：從工作列探頭、坐在圖示旁、趴在桌面邊緣。",
     "gallery.path": "固定圖庫：{path}",
     "gallery.empty": "受管理圖庫裡還沒有貓圖。請先匯入高清透明貓圖，或生成 AI 透明貓。",
@@ -675,6 +715,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.refresh": "今すぐ更新",
     "action.prefetch": "HD パックを保存",
     "action.generateAi": "透明猫を生成",
+    "action.validateAiKey": "API キーを検証",
     "action.save": "設定を保存",
     "action.select": "使う",
     "action.delete": "削除",
@@ -694,6 +735,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.prefetched": "{count} 枚の HD 猫画像を保存しました",
     "status.generatingAi": "透明猫カットアウトを生成中",
     "status.generatedAi": "{count} 枚の透明猫を生成しました",
+    "status.validatingAiKey": "AI API キーを検証中",
+    "status.savingAi": "生成した猫画像を保存中",
+    "status.aiKeyValid": "API キー OK: {model}",
+    "status.aiElapsed": "経過 {seconds} 秒",
+    "status.aiDoneAlert": "透明猫の生成が完了しました: {count} 枚。",
     "status.galleryLoaded": "ギャラリーを読み込みました",
     "status.importing": "選択した猫画像を読み込み中",
     "status.imported": "{count} 枚の猫画像を読み込みました",
@@ -745,7 +791,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.aiCount": "生成枚数",
     "field.transparentCutout": "透明 PNG カットアウト",
     "field.autoUseGenerated": "最新生成猫を自動使用",
+    "field.aiProgress": "生成モニター",
     "hint.transparentCutout": "背景なしの猫素材を作り、デスクトップに配置します。",
+    "hint.aiKey": "生成前に選択したプロバイダーの API キーを自動検証し、その後に画像生成リクエストを送ります。",
     "hint.aiScene": "例: タスクバーから覗く、アイコン横に座る、デスクトップ端で伸びる。",
     "gallery.path": "固定ギャラリー: {path}",
     "gallery.empty": "管理ギャラリーに猫画像はまだありません。HD の透明猫画像を読み込むか、AI 透明猫を生成してください。",
@@ -824,6 +872,7 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "action.refresh": "지금 새로고침",
     "action.prefetch": "HD 팩 캐시",
     "action.generateAi": "투명 고양이 생성",
+    "action.validateAiKey": "API 키 검증",
     "action.save": "설정 저장",
     "action.select": "사용",
     "action.delete": "삭제",
@@ -843,6 +892,11 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "status.prefetched": "HD 고양이 이미지 {count}장 캐시됨",
     "status.generatingAi": "투명 고양이 컷아웃 생성 중",
     "status.generatedAi": "투명 고양이 {count}장 생성됨",
+    "status.validatingAiKey": "AI API 키 검증 중",
+    "status.savingAi": "생성된 고양이 이미지 저장 중",
+    "status.aiKeyValid": "API 키 정상: {model}",
+    "status.aiElapsed": "경과 {seconds}초",
+    "status.aiDoneAlert": "투명 고양이 생성 완료: {count}장.",
     "status.galleryLoaded": "갤러리 로드됨",
     "status.importing": "선택한 고양이 이미지 가져오는 중",
     "status.imported": "고양이 이미지 {count}장 가져옴",
@@ -894,7 +948,9 @@ const dictionary: Record<Locale, Record<string, string>> = {
     "field.aiCount": "생성 수",
     "field.transparentCutout": "투명 PNG 컷아웃",
     "field.autoUseGenerated": "최신 생성 고양이 자동 사용",
+    "field.aiProgress": "생성 진행 모니터",
     "hint.transparentCutout": "배경 없는 고양이 소재를 만들어 데스크톱에 배치합니다.",
+    "hint.aiKey": "생성 전 선택한 제공자의 API 키를 자동 검증한 뒤 이미지 생성 요청을 보냅니다.",
     "hint.aiScene": "예: 작업 표시줄에서 고개 내밀기, 아이콘 옆에 앉기, 화면 가장자리에서 스트레칭.",
     "gallery.path": "고정 갤러리: {path}",
     "gallery.empty": "관리 갤러리에 아직 고양이 이미지가 없습니다. HD 투명 고양이 이미지를 가져오거나 AI 투명 고양이를 먼저 생성하세요.",
@@ -985,6 +1041,15 @@ function App() {
     top_reasons: [],
   });
   const [feedbackReason, setFeedbackReason] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiElapsed, setAiElapsed] = useState(0);
+  const [aiKeyStatus, setAiKeyStatus] = useState("");
+  const [aiProgress, setAiProgress] = useState<AiGenerationProgress>({
+    stage: "idle",
+    message: "",
+    current: 0,
+    total: 0,
+  });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const locale = resolveLocale(config.language);
   const t = useMemo(() => translator(locale), [locale]);
@@ -1047,6 +1112,39 @@ function App() {
       .catch(() => setSlots(clientSlots(previewSlotCount)));
   }, [previewSlotCount]);
 
+  useEffect(() => {
+    if (!hasTauriRuntime()) return;
+    let cancelled = false;
+    let unlistenHandler: (() => void) | undefined;
+    listen<AiGenerationProgress>("ai-generation-progress", (event) => {
+      if (cancelled) return;
+      const message = aiProgressMessage(event.payload, t);
+      setAiProgress({ ...event.payload, message });
+      setStatus(message);
+      if (event.payload.stage === "completed" || event.payload.stage === "failed") {
+        setAiBusy(false);
+      }
+    }).then((unlisten) => {
+      unlistenHandler = unlisten;
+      if (cancelled) {
+        unlisten();
+      }
+    });
+    return () => {
+      cancelled = true;
+      unlistenHandler?.();
+    };
+  }, [t]);
+
+  useEffect(() => {
+    if (!aiBusy) return;
+    setAiElapsed(0);
+    const timer = window.setInterval(() => {
+      setAiElapsed((seconds) => seconds + 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [aiBusy]);
+
   const enabledInteractions = useMemo(
     () =>
       Object.entries(config.interactions)
@@ -1106,8 +1204,27 @@ function App() {
   }
 
   async function generateAiCats() {
-    setStatus("status.generatingAi");
+    setAiBusy(true);
+    setAiElapsed(0);
+    setAiProgress({
+      stage: "validating",
+      message: t("status.validatingAiKey"),
+      current: 0,
+      total: config.ai_generation.count,
+    });
+    setStatus("status.validatingAiKey");
     try {
+      const saved = await safeInvoke<AppConfig>("save_config", { config }, config);
+      setConfig(mergeConfig(saved));
+      const validation = await safeInvoke<ApiKeyValidation>("validate_ai_api_key");
+      setAiKeyStatus(format(t("status.aiKeyValid"), { model: validation.model }));
+      setStatus(format(t("status.aiKeyValid"), { model: validation.model }));
+      setAiProgress({
+        stage: "requesting",
+        message: t("status.generatingAi"),
+        current: 0,
+        total: config.ai_generation.count,
+      });
       const images = await safeInvoke<GalleryImage[]>(
         "generate_ai_cat_images",
         { count: config.ai_generation.count },
@@ -1115,8 +1232,39 @@ function App() {
       );
       setGalleryImages(images);
       setStatus(format(t("status.generatedAi"), { count: images.length }));
+      setAiProgress({
+        stage: "completed",
+        message: format(t("status.generatedAi"), { count: images.length }),
+        current: images.length,
+        total: config.ai_generation.count,
+      });
       await loadGallery();
+      window.alert(format(t("status.aiDoneAlert"), { count: images.length }));
     } catch (error) {
+      setStatus(String(error));
+      setAiProgress({
+        stage: "failed",
+        message: String(error),
+        current: 0,
+        total: config.ai_generation.count,
+      });
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  async function validateAiKey() {
+    setStatus("status.validatingAiKey");
+    setAiKeyStatus("");
+    try {
+      const saved = await safeInvoke<AppConfig>("save_config", { config }, config);
+      setConfig(mergeConfig(saved));
+      const validation = await safeInvoke<ApiKeyValidation>("validate_ai_api_key");
+      const message = format(t("status.aiKeyValid"), { model: validation.model });
+      setAiKeyStatus(message);
+      setStatus(message);
+    } catch (error) {
+      setAiKeyStatus(String(error));
       setStatus(String(error));
     }
   }
@@ -1744,6 +1892,10 @@ function App() {
                 }
               />
             </label>
+            <button className="secondary panel-action" type="button" onClick={validateAiKey}>
+              {t("action.validateAiKey")}
+            </button>
+            <p className="panel-note">{aiKeyStatus || t("hint.aiKey")}</p>
             <label className="field">
               {t("field.aiScene")}
               <input
@@ -1805,7 +1957,31 @@ function App() {
                 }
               />
             </label>
-            <button className="primary panel-action" type="button" onClick={generateAiCats}>
+            <div className="analysis-box">
+              <strong>{t("field.aiProgress")}</strong>
+              <small>{aiProgress.message || t("status.ready")}</small>
+              {aiBusy && (
+                <small>{format(t("status.aiElapsed"), { seconds: aiElapsed })}</small>
+              )}
+              {aiProgress.total > 0 && (
+                <div className="progress-bar" aria-label={t("field.aiProgress")}>
+                  <span
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.round((aiProgress.current / Math.max(aiProgress.total, 1)) * 100),
+                      )}%`,
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+            <button
+              className="primary panel-action"
+              disabled={aiBusy}
+              type="button"
+              onClick={generateAiCats}
+            >
               {t("action.generateAi")}
             </button>
           </Panel>
@@ -1847,7 +2023,7 @@ function App() {
                     .join(" ")}
                   key={image.path}
                 >
-                  <img alt={image.file_name} src={imageSrc(image.path)} />
+                  <img alt={image.file_name} src={image.thumbnail_data_url || imageSrc(image.path)} />
                   <strong>{image.file_name}</strong>
                   <small>
                     {format(t("gallery.quality"), {
@@ -2172,10 +2348,21 @@ function mergeConfig(config: AppConfig): AppConfig {
   };
 }
 
-function imageSrc(path: string): string {
-  if (!path) return "";
-  if (!hasTauriRuntime()) return "";
-  return convertFileSrc(path);
+function imageSrc(_path: string): string {
+  return "";
+}
+
+function aiProgressMessage(
+  progress: AiGenerationProgress,
+  t: (key: string) => string,
+): string {
+  if (progress.stage === "validating") return t("status.validatingAiKey");
+  if (progress.stage === "requesting") return t("status.generatingAi");
+  if (progress.stage === "saving") return t("status.savingAi");
+  if (progress.stage === "completed") {
+    return format(t("status.generatedAi"), { count: progress.current });
+  }
+  return progress.message;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
